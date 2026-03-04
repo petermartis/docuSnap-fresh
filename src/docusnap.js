@@ -2674,9 +2674,9 @@
 
       function fail(msg) { clearTimeout(timer); reject(new Error(msg)); }
 
-      // Step 1: pico.js runtime from npm on jsDelivr (stable, versioned URL)
+      // Step 1: pico.js runtime from GitHub via jsDelivr (confirmed-working URL)
       var script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/picojs/pico.js';
+      script.src = 'https://cdn.jsdelivr.net/gh/nenadmarkus/picojs/pico.js';
       script.onerror = function () { fail('pico.js script load failed'); };
       script.onload = function () {
         if (typeof pico === 'undefined' || typeof pico.unpack_cascade !== 'function') {
@@ -2778,11 +2778,13 @@
     var params = { shiftfactor: 0.1, minsize: 20, maxsize: Math.min(cw, ch) * 0.9, scalefactor: 1.1 };
 
     var dets = pico.run_cascade(image, this._picoCascade, params) || [];
-    // Apply NMS (non-maximum suppression) to merge overlapping boxes
-    if (typeof pico.clusterdetections === 'function') {
-      dets = pico.clusterdetections(dets, 0.2);
+    // Apply NMS — pico exposes cluster_detections (underscore, not camelCase)
+    if (typeof pico.cluster_detections === 'function') {
+      dets = pico.cluster_detections(dets, 0.2);
     }
-    dets = dets.filter(function (d) { return d[3] > 5.0; }); // pico scores: real faces ~10-50+
+    // Threshold: pico scores for a clear face are typically 5-50+; printed ID card
+    // face photos may score lower (2-5), so keep the cutoff permissive.
+    dets = dets.filter(function (d) { return d[3] > 2.0; });
     if (!dets.length) return { present: false, confidence: 0, bounds: null };
 
     var best = dets.reduce(function (a, b) { return a[3] > b[3] ? a : b; });
