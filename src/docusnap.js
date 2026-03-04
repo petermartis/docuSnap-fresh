@@ -1562,7 +1562,7 @@
 
       var checks = {
         sharpness: { value: sharpness, pass: sharpness >= sharpnessMin },
-        brightness: { value: brightness, pass: brightness >= brightnessMin && brightness <= brightnessMax },
+        brightness: { value: brightness, pass: brightness >= brightnessMin && brightness <= brightnessMax, min: brightnessMin, max: brightnessMax },
         glare: { value: glare, pass: glare <= glareMax },
         cornersFound: { value: completeness.allCornersFound, pass: completeness.allCornersFound },
         cornersWithinMargin: { value: completeness.allWithinMargin, pass: completeness.allWithinMargin },
@@ -1872,7 +1872,7 @@
       } else if (!checks.glare.pass) {
         instruction = "Reduce glare - tilt document slightly";
       } else if (!checks.brightness.pass) {
-        if (checks.brightness.value < 40) {
+        if (checks.brightness.value < checks.brightness.min) {
           instruction = "Too dark - improve lighting";
         } else {
           instruction = "Too bright - reduce lighting";
@@ -2282,7 +2282,7 @@
         if (!checks.sharpness.pass) issues.push("image is blurry");
         if (!checks.glare.pass) issues.push("glare detected");
         if (!checks.brightness.pass) {
-          issues.push(checks.brightness.value < 40 ? "too dark" : "too bright");
+          issues.push(checks.brightness.value < checks.brightness.min ? "too dark" : "too bright");
         }
         this._statusEl.textContent = "Quality issues: " + issues.join(", ") + ". Please retake.";
 
