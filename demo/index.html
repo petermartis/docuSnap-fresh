@@ -730,7 +730,7 @@
           canvasElement: canvas,
           consecutiveFramesNeeded: 5,
           stayStillDurationMs: 1000,
-          frameIntervalMs: 100,
+          frameIntervalMs: 66,   // ~15 FPS — fast enough with the 640px detection canvas
           thresholds: currentThresholds,
           onCapture: (captureResult) => {
             showCaptureResult(captureResult.extractedData || captureResult.imageData);
@@ -784,11 +784,8 @@
             video.srcObject = stream;
             await video.play();
 
-            // Set canvas size and give CSS the aspect-ratio so height:auto works
-            canvas.width  = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
-
+            // Canvas dimensions + aspect-ratio are now set by the library on the first
+            // valid frame (at display resolution, not full camera resolution).
             autoCapture.start();
             startBtn.disabled  = true;
             stopBtn.disabled   = false;

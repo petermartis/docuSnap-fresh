@@ -1676,6 +1676,8 @@
       this._cornerRejectCount = 0;
       this._kalmanFilters = null;
       this._currentTransparency = 70;    // Reset overlay opacity
+      // Persistent small canvas reused every frame for detection (avoids per-frame allocation)
+      if (!this._detCanvas) this._detCanvas = document.createElement("canvas");
       this._onStateChange(State.DETECTING, "Position document in frame");
       this._tick();
     }
@@ -1724,63 +1726,117 @@
       });
     }
 
-    /** @private */
+    /**
+     * @private
+     *
+     * Two-tier canvas pipeline for good mobile frame rates:
+     *
+     * ┌─────────────────────────────────────────────────────────────────────┐
+     * │ DETECTION  (this._detCanvas, max 640px longest side)               │
+     * │   – created once in start(), reused every frame                    │
+     * │   – getImageData on ~0.6 MB instead of 8 MB for 1080p             │
+     * │   – Hough + quality assessment on 640×360 ≈ 8× faster than 1080p │
+     * ├─────────────────────────────────────────────────────────────────────┤
+     * │ DISPLAY    (this._canvas, max 720px longest side)                  │
+     * │   – video drawn directly, never getImageData'd                     │
+     * │   – overlay corners scaled up from detection space                 │
+     * │   – dimensions set once on first valid frame, not every frame     │
+     * ├─────────────────────────────────────────────────────────────────────┤
+     * │ CAPTURE    (fresh full-res grab at _selectBestFrame time)          │
+     * │   – corners scaled back to full video resolution for extraction    │
+     * │   – high-quality JPEG from actual camera pixel count              │
+     * └─────────────────────────────────────────────────────────────────────┘
+     */
     async _evaluateFrame() {
       var video = this._video;
       if (video.readyState < video.HAVE_CURRENT_DATA) return;
 
-      // Grab frame from video
-      var offscreen = document.createElement("canvas");
-      offscreen.width = video.videoWidth;
-      offscreen.height = video.videoHeight;
-      var ctx = offscreen.getContext("2d");
-      ctx.drawImage(video, 0, 0);
+      var vw = video.videoWidth;
+      var vh = video.videoHeight;
+      if (!vw || !vh) return;
 
-      var imageData = ctx.getImageData(0, 0, offscreen.width, offscreen.height);
+      // ── Detection canvas (persistent, 640px max) ───────────────────────
+      var DET_MAX = 640;
+      var detScale = Math.min(1, DET_MAX / Math.max(vw, vh));
+      var detW = Math.round(vw * detScale);
+      var detH = Math.round(vh * detScale);
 
-      // Detect document (synchronous — line-based detector is fast)
-      var detection = this._scanner._detector.detect(
-        imageData.data, offscreen.width, offscreen.height
-      );
-      var cornerPoints = detection ? detection.cornerPoints : null;
+      var detCanvas = this._detCanvas;
+      if (detCanvas.width !== detW || detCanvas.height !== detH) {
+        detCanvas.width  = detW;
+        detCanvas.height = detH;
+      }
+      var detCtx = detCanvas.getContext("2d");
+      detCtx.drawImage(video, 0, 0, detW, detH);
+      var imageData = detCtx.getImageData(0, 0, detW, detH);
 
-      // Assess quality
+      // ── Detect + assess at detection resolution ────────────────────────
+      var detection  = this._scanner._detector.detect(imageData.data, detW, detH);
+      var detCorners = detection ? detection.cornerPoints : null;
+
       var report = this._scanner.assessQuality(
-        imageData.data, offscreen.width, offscreen.height, cornerPoints, this._thresholds
+        imageData.data, detW, detH, detCorners, this._thresholds
       );
       this._onQualityReport(report);
 
-      // Update stable bounding box with smoothing
-      this._updateStableCorners(cornerPoints, offscreen.width, offscreen.height);
+      // ── Scale corners to display space and full-video space ────────────
+      // Display canvas is capped at 720px; full-video space used for capture.
+      var DISP_MAX  = 720;
+      var dispScale = Math.min(1, DISP_MAX / Math.max(vw, vh));
+      var dispW     = Math.round(vw * dispScale);
+      var dispH     = Math.round(vh * dispScale);
 
-      // Always draw video frame to canvas, with smoothed overlay
+      var dispCorners = null;
+      var fullCorners = null;
+      if (detCorners) {
+        var toDisp = dispW / detW;                      // det-space → display-space
+        var toFull = detScale < 1 ? 1 / detScale : 1;  // det-space → full-video-space
+        dispCorners = {
+          topLeftCorner:     { x: detCorners.topLeftCorner.x     * toDisp, y: detCorners.topLeftCorner.y     * toDisp },
+          topRightCorner:    { x: detCorners.topRightCorner.x    * toDisp, y: detCorners.topRightCorner.y    * toDisp },
+          bottomRightCorner: { x: detCorners.bottomRightCorner.x * toDisp, y: detCorners.bottomRightCorner.y * toDisp },
+          bottomLeftCorner:  { x: detCorners.bottomLeftCorner.x  * toDisp, y: detCorners.bottomLeftCorner.y  * toDisp },
+        };
+        fullCorners = {
+          topLeftCorner:     { x: detCorners.topLeftCorner.x     * toFull, y: detCorners.topLeftCorner.y     * toFull },
+          topRightCorner:    { x: detCorners.topRightCorner.x    * toFull, y: detCorners.topRightCorner.y    * toFull },
+          bottomRightCorner: { x: detCorners.bottomRightCorner.x * toFull, y: detCorners.bottomRightCorner.y * toFull },
+          bottomLeftCorner:  { x: detCorners.bottomLeftCorner.x  * toFull, y: detCorners.bottomLeftCorner.y  * toFull },
+        };
+      }
+
+      // ── Kalman smoother operates in display space ──────────────────────
+      this._updateStableCorners(dispCorners, dispW, dispH);
+
+      // ── Draw to display canvas ─────────────────────────────────────────
       if (this._canvas) {
-        this._canvas.width = offscreen.width;
-        this._canvas.height = offscreen.height;
+        // Resize only when dimensions actually change (avoids clearing + reflow every frame)
+        if (this._canvas.width !== dispW || this._canvas.height !== dispH) {
+          this._canvas.width  = dispW;
+          this._canvas.height = dispH;
+          this._canvas.style.aspectRatio = dispW + " / " + dispH;
+        }
         var canvasCtx = this._canvas.getContext("2d");
-        
-        // Draw video frame at full opacity
-        canvasCtx.drawImage(offscreen, 0, 0);
-        
-        // Draw spotlight effect and document overlay.
-        // Guard: after Kalman smoothing, corners can cross (bowtie) when the detector
-        // assigns different physical corners to the same label on consecutive frames.
-        // Drawing a self-intersecting quad is always wrong, so reset on detection.
+
+        // Draw video at display resolution directly (no intermediate canvas copy)
+        canvasCtx.drawImage(video, 0, 0, dispW, dispH);
+
+        // Convexity guard: bowtie corners from Kalman crossing → reset
         if (this._displayCorners && !this._isCornersConvex(this._displayCorners)) {
           this._displayCorners = null;
-          this._stableCorners = null;
-          this._kalmanFilters = null;
+          this._stableCorners  = null;
+          this._kalmanFilters  = null;
         }
 
         if (this._displayCorners) {
-          this._drawSpotlightOverlay(canvasCtx, this._displayCorners, report, offscreen.width, offscreen.height);
+          this._drawSpotlightOverlay(canvasCtx, this._displayCorners, report, dispW, dispH);
         } else {
-          // No document detected - dim entire frame
-          canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-          canvasCtx.fillRect(0, 0, offscreen.width, offscreen.height);
+          canvasCtx.fillStyle = "rgba(0, 0, 0, 0.5)";
+          canvasCtx.fillRect(0, 0, dispW, dispH);
         }
       }
 
+      // ── State machine ──────────────────────────────────────────────────
       if (this._state === State.DETECTING) {
         if (report.allPassed) {
           this._consecutiveGoodFrames++;
@@ -1803,11 +1859,12 @@
           this._candidates = [];
           this._onStateChange(State.DETECTING, "Position document in frame");
         } else {
+          // Store detection-space corners scaled to full video resolution — the actual
+          // high-quality frame is grabbed fresh from the video in _selectBestFrame.
           this._candidates.push({
-            sharpness: report.checks.sharpness.value,
-            imageData: offscreen.toDataURL("image/jpeg", 0.95),
-            cornerPoints: cornerPoints,
-            report: report,
+            sharpness:   report.checks.sharpness.value,
+            fullCorners: fullCorners,
+            report:      report,
           });
 
           if (performance.now() - this._stayStillStart >= this._stayStillMs) {
@@ -1821,45 +1878,50 @@
     async _selectBestFrame() {
       this._state = State.CAPTURED;
 
+      // Pick sharpest candidate
       var best = this._candidates[0];
       for (var i = 1; i < this._candidates.length; i++) {
-        if (this._candidates[i].sharpness > best.sharpness) {
-          best = this._candidates[i];
-        }
+        if (this._candidates[i].sharpness > best.sharpness) best = this._candidates[i];
       }
 
-      // Extract perspective-corrected document
+      var video = this._video;
+      var vw    = video.videoWidth;
+      var vh    = video.videoHeight;
+
+      // ── Grab one full-resolution frame from the live video ────────────
+      // (candidates no longer store a JPEG per frame — saves memory and per-frame cost)
+      var captureCanvas = document.createElement("canvas");
+      captureCanvas.width  = vw;
+      captureCanvas.height = vh;
+      captureCanvas.getContext("2d").drawImage(video, 0, 0);
+      var capturedImageData = captureCanvas.toDataURL("image/jpeg", 0.95);
+      captureCanvas = null; // allow GC
+
+      // ── Perspective-correct extraction ────────────────────────────────
       var self = this;
       var extractedDataUrl = null;
 
       try {
-        // Load the best frame as an image
         var img = new Image();
-        await new Promise(function(resolve, reject) {
+        await new Promise(function (resolve, reject) {
           img.onload = resolve;
           img.onerror = reject;
-          img.src = best.imageData;
+          img.src = capturedImageData;
         });
 
-        // Extract with perspective correction and 25% margin
-        // Compute output dimensions from the detected document's actual aspect ratio
-        // so passports (1.42) and credit cards (1.586) are both rendered without distortion
-        var cp = best.cornerPoints;
-        var _topW  = Math.hypot(cp.topRightCorner.x  - cp.topLeftCorner.x,  cp.topRightCorner.y  - cp.topLeftCorner.y);
-        var _botW  = Math.hypot(cp.bottomRightCorner.x - cp.bottomLeftCorner.x, cp.bottomRightCorner.y - cp.bottomLeftCorner.y);
-        var _lefH  = Math.hypot(cp.bottomLeftCorner.x  - cp.topLeftCorner.x,  cp.bottomLeftCorner.y  - cp.topLeftCorner.y);
-        var _rigH  = Math.hypot(cp.bottomRightCorner.x - cp.topRightCorner.x, cp.bottomRightCorner.y - cp.topRightCorner.y);
-        var _avgW  = (_topW + _botW) / 2;
-        var _avgH  = (_lefH + _rigH) / 2;
-        var _longSide = 856; // fix the longer side to 856px for consistent resolution
-        var docWidth  = _avgW >= _avgH ? _longSide : Math.round(_longSide * _avgW / _avgH);
-        var docHeight = _avgW >= _avgH ? Math.round(_longSide * _avgH / _avgW) : _longSide;
-        var extracted = await self._scanner.extractPaper(
-          img, docWidth, docHeight, best.cornerPoints, { margin: 0.25 }
-        );
-
-        if (extracted) {
-          extractedDataUrl = extracted.toDataURL("image/jpeg", 0.95);
+        var cp = best.fullCorners;
+        if (cp) {
+          var _topW  = Math.hypot(cp.topRightCorner.x  - cp.topLeftCorner.x,  cp.topRightCorner.y  - cp.topLeftCorner.y);
+          var _botW  = Math.hypot(cp.bottomRightCorner.x - cp.bottomLeftCorner.x, cp.bottomRightCorner.y - cp.bottomLeftCorner.y);
+          var _lefH  = Math.hypot(cp.bottomLeftCorner.x  - cp.topLeftCorner.x,  cp.bottomLeftCorner.y  - cp.topLeftCorner.y);
+          var _rigH  = Math.hypot(cp.bottomRightCorner.x - cp.topRightCorner.x, cp.bottomRightCorner.y - cp.topRightCorner.y);
+          var _avgW  = (_topW + _botW) / 2;
+          var _avgH  = (_lefH + _rigH) / 2;
+          var _longSide = 856;
+          var docWidth  = _avgW >= _avgH ? _longSide : Math.round(_longSide * _avgW / _avgH);
+          var docHeight = _avgW >= _avgH ? Math.round(_longSide * _avgH / _avgW) : _longSide;
+          var extracted = await self._scanner.extractPaper(img, docWidth, docHeight, cp, { margin: 0.25 });
+          if (extracted) extractedDataUrl = extracted.toDataURL("image/jpeg", 0.95);
         }
       } catch (e) {
         console.error("docuSnap: extraction error:", e);
@@ -1867,9 +1929,9 @@
 
       this._onStateChange(State.CAPTURED, "Document captured");
       this._onCapture({
-        imageData: best.imageData,           // Original frame
-        extractedData: extractedDataUrl,     // Perspective-corrected + margin
-        cornerPoints: best.cornerPoints,
+        imageData:     capturedImageData,   // Full-resolution grab from video
+        extractedData: extractedDataUrl,    // Perspective-corrected + 25% margin
+        cornerPoints:  best.fullCorners,
         qualityReport: best.report,
       });
     }
