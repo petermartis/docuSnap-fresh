@@ -126,17 +126,108 @@
     #startBtn    { background: #00d9ff; color: #000; }
     #stopBtn     { background: #ff4757; color: #fff; }
     #captureBtn  { background: #2ed573; color: #000; display: none; }
-    #nextSideBtn { background: #ffa502; color: #000; display: none; }
 
-    /* ─────────────────── Side indicator ─────────────────── */
-    #sideIndicator {
+    /* ─────────────────── Side step indicator ─────────────────── */
+    #sideSteps {
       display: none;
-      text-align: center;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
       margin-top: 8px;
-      padding: 6px;
-      font-size: 12px; color: #aaa;
+      padding: 8px 16px;
       background: #0f0f23;
       border-radius: 6px;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .step-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      border: 2px solid #555;
+      background: transparent;
+      flex-shrink: 0;
+      transition: background 0.3s, border-color 0.3s;
+    }
+    .step-dot.active { border-color: #00d9ff; background: #00d9ff; box-shadow: 0 0 6px #00d9ff88; }
+    .step-dot.done   { border-color: #2ed573; background: #2ed573; }
+    .step-lbl {
+      font-size: 11px; font-weight: 700; color: #555;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      transition: color 0.3s;
+    }
+    .step-lbl.active { color: #00d9ff; }
+    .step-lbl.done   { color: #2ed573; }
+    .step-connector {
+      width: 40px; height: 2px;
+      background: #333;
+      margin: 0 8px;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .step-connector.done { background: #2ed573; }
+
+    /* ─────────────────── Flip prompt ─────────────────── */
+    #flipPrompt {
+      display: none;
+      margin-top: 10px;
+      background: #16213e;
+      border-radius: 12px;
+      padding: 18px 16px;
+      text-align: center;
+      border: 1px solid rgba(46,213,115,0.3);
+    }
+    .flip-check  { font-size: 1.8em; margin-bottom: 6px; }
+    .flip-title  { font-size: 1em; font-weight: 700; color: #2ed573; margin-bottom: 10px; }
+    .flip-thumb-wrap {
+      background: #0f0f23;
+      border-radius: 8px;
+      overflow: hidden;
+      display: inline-block;
+      max-width: 160px;
+      margin-bottom: 12px;
+    }
+    .flip-thumb-wrap img { display: block; width: 100%; height: auto; max-height: 100px; object-fit: contain; }
+    .flip-instruction { color: #aaa; font-size: 12px; margin-bottom: 14px; line-height: 1.4; }
+    .flip-cta {
+      display: block; width: 100%; max-width: 280px;
+      margin: 0 auto;
+      padding: 12px 24px;
+      background: #ffa502; color: #000;
+      font-size: 14px; font-weight: 700;
+      border: none; border-radius: 10px;
+      cursor: pointer; font-family: inherit;
+      transition: transform 0.1s, opacity 0.15s;
+    }
+    .flip-cta:hover  { transform: scale(1.02); }
+    .flip-cta:active { transform: scale(0.97); }
+
+    /* ─────────────────── Two-up result (both sides captured) ─────────────────── */
+    .two-up {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .two-up-col {
+      background: #0f0f23;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .two-up-img  { display: block; width: 100%; height: auto; }
+    .two-up-lbl  {
+      text-align: center;
+      padding: 4px 6px;
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em; color: #666;
+      background: #0a0a18;
+    }
+    .two-up-quality {
+      padding: 4px 5px;
+      display: flex; flex-wrap: wrap; gap: 3px;
+      background: #0a0a18;
+      border-top: 1px solid #16213e;
     }
 
     /* ─────────────────── Real-time quality panel ─────────────────── */
@@ -474,11 +565,10 @@
       <button id="stopBtn"    disabled>⏹ Stop</button>
       <!-- captureBtn: hidden by default; only shown in Manual mode -->
       <button id="captureBtn" disabled>📸 Capture</button>
-      <button id="nextSideBtn">↩ Scan Other Side</button>
     </div>
 
-    <!-- Side progress (shown when sides > 1) -->
-    <div id="sideIndicator"></div>
+    <!-- Step indicator for multi-side scanning — populated + driven by frame.sideIndex -->
+    <div id="sideSteps"></div>
 
     <!-- ══ Real-time quality panel ══ -->
     <div class="quality-panel">
@@ -577,7 +667,9 @@
         </div>
         <!-- Quality snapshot for this capture (2-col grid, face spans both) -->
         <div id="capturedQuality"></div>
-      </div>
+      </div><!-- /.captured-card -->
+    <!-- Flip prompt: shown between first and second side captures -->
+    <div id="flipPrompt"></div>
     </section>
 
     <!-- ══ Capture History (full width) ══ -->
@@ -608,7 +700,8 @@ const capturedTabs      = document.getElementById('capturedTabs');
 const tabFull           = document.getElementById('tabFull');
 const tabDoc            = document.getElementById('tabDoc');
 const capturedQualityEl = document.getElementById('capturedQuality');
-const sideIndicator     = document.getElementById('sideIndicator');
+const sideSteps         = document.getElementById('sideSteps');
+const flipPromptEl      = document.getElementById('flipPrompt');
 const scoreEl           = document.getElementById('score');
 const hintBox           = document.getElementById('hintBox');
 const banner            = document.getElementById('instructionBanner');
@@ -632,7 +725,6 @@ const shutterFlash   = document.getElementById('shutterFlash');
 const startBtn       = document.getElementById('startBtn');
 const stopBtn        = document.getElementById('stopBtn');
 const captureBtn     = document.getElementById('captureBtn');
-const nextSideBtn    = document.getElementById('nextSideBtn');
 const applyConfig    = document.getElementById('applyConfigBtn');
 const videoContainer = document.getElementById('videoContainer');
 const fallbackCont   = document.getElementById('fallbackContainer');
@@ -640,7 +732,8 @@ const fallbackCont   = document.getElementById('fallbackContainer');
 // ── State ─────────────────────────────────────────────────────────────────
 let snap           = null;
 let stream         = null;
-let capturedImages = { full: null, doc: null };
+let sideObjectUrls = [];   // [{ full: url|null, doc: url|null }] — one per captured side
+let capturedSides  = [];   // CaptureResult array for the current session
 let activeSide     = 0;
 
 const MAX_HISTORY    = 20;
@@ -684,11 +777,9 @@ function buildConfig() {
 
 // ── Init / restart ─────────────────────────────────────────────────────────
 async function initApp() {
-  if (DocuSnap.detectCapability() === 'file') {
-    startBtn.style.display = 'none';
-    stopBtn.style.display  = 'none';
-    await startCapture(true);
-  }
+  // Auto-start immediately on page load.
+  // startCapture handles both camera mode and file-fallback mode internally.
+  await startCapture(false);
 }
 
 async function startCapture(forceFile) {
@@ -707,8 +798,10 @@ async function startCapture(forceFile) {
   faceBadge.style.display = faceActive ? 'block' : 'none';
   if (faceActive) { faceBadge.textContent = '👤 –'; faceBadge.className = 'unknown'; }
 
-  sideIndicator.style.display = cfg.sides > 1 ? '' : 'none';
-  if (cfg.sides > 1) updateSideIndicator(0, cfg.sides);
+  capturedSides  = [];
+  // sideSteps are driven entirely by frame.sideIndex in handleFrame; reset here
+  sideSteps.style.display = 'none';
+  sideSteps.innerHTML     = '';
 
   snap = new DocuSnap({
     documentType:      cfg.docType,
@@ -812,6 +905,9 @@ function handleFrame(frame) {
   // Resolve which instruction code/hint to display (throttled for failures).
   resolveDisplayCode(frame);
 
+  // Update step indicator from live sideIndex (shows which side is being scanned)
+  if (frame.sidesTotal > 1) updateSideSteps(frame.sideIndex, frame.sidesTotal);
+
   // ── Document detection state ─────────────────────────────────────────────
   // Quality metrics are only meaningful once a document has been located.
   // While searching, dim the grid and show a neutral "looking" message.
@@ -897,34 +993,26 @@ function setIndicator(valueEl, statusEl, value, pass, suffix) {
 
 // ── Capture handler ────────────────────────────────────────────────────────
 function handleCapture(cr) {
-  // Shutter flash + sound for real camera captures (skip for file/WebView uploads)
+  // Shutter flash + sound for real camera captures (not file uploads)
   if (cr.captureMode !== 'file') triggerShutter();
 
   activeSide = cr.sideIndex;
-  revokeCapturedUrls();
+  capturedSides.push(cr);
 
-  capturedImages.full = cr.image         ? URL.createObjectURL(cr.image)         : null;
-  capturedImages.doc  = cr.documentImage ? URL.createObjectURL(cr.documentImage) : null;
+  // Store per-side object URLs (revoked on next session start)
+  sideObjectUrls[cr.sideIndex] = {
+    full: cr.image         ? URL.createObjectURL(cr.image)         : null,
+    doc:  cr.documentImage ? URL.createObjectURL(cr.documentImage) : null,
+  };
+  const urls = sideObjectUrls[cr.sideIndex];
 
-  if (capturedImages.doc) {
-    showResultImage(capturedImages.doc);
-    capturedTabs.style.display = 'flex';
-    tabDoc.classList.add('active');
-    tabFull.classList.remove('active');
-  } else {
-    showResultImage(capturedImages.full);
-    capturedTabs.style.display = 'none';
-  }
+  // Score line
+  scoreEl.textContent = cr.isLastSide && cr.sidesTotal > 1
+    ? '✅ Both sides captured!'
+    : '✅ Captured!';
+  scoreEl.style.color = '#2ed573';
 
-  renderCapturedQuality(cr.quality, cr.face);
-  addToHistory(cr);
-
-  result.style.boxShadow = '0 0 30px #2ed573';
-  setTimeout(() => { result.style.boxShadow = 'none'; }, 500);
-
-  scoreEl.textContent = '✅ Captured!';
-  scoreEl.style.color  = '#2ed573';
-
+  // Face badge
   if (cr.face && cr.face.present !== null) {
     const requireFace = document.getElementById('cfgFace').value === 'require';
     indFace.textContent       = cr.face.present ? 'Yes' : 'No';
@@ -933,19 +1021,131 @@ function handleCapture(cr) {
     faceBadge.className       = cr.face.present ? 'present' : 'absent';
   }
 
+  addToHistory(cr);
+
   if (!cr.isLastSide) {
-    nextSideBtn.style.display = '';
-    updateSideIndicator(cr.sideIndex, cr.sidesTotal);
+    // ── Intermediate capture (first of multiple sides) ────────────────────
+    // Show the captured image for review, then prompt user to flip
+    renderSingleCapture(urls, cr.quality, cr.face);
+    showFlipPrompt(cr);
+    updateSideSteps(cr.sideIndex, cr.sidesTotal);
+  } else if (cr.sidesTotal > 1) {
+    // ── All sides complete ────────────────────────────────────────────────
+    flipPromptEl.style.display = 'none';
+    renderTwoUpCapture(capturedSides);
+    updateSideSteps(cr.sideIndex, cr.sidesTotal);
   } else {
-    nextSideBtn.style.display = 'none';
-    if (cr.sidesTotal > 1) updateSideIndicator(cr.sideIndex, cr.sidesTotal);
+    // ── Single-side capture ───────────────────────────────────────────────
+    renderSingleCapture(urls, cr.quality, cr.face);
   }
+
+  // Glow effect on result card
+  result.style.boxShadow = '0 0 30px #2ed573';
+  setTimeout(function () { result.style.boxShadow = 'none'; }, 500);
 
   console.log('[demo] Capture:', {
     sideIndex: cr.sideIndex, isLastSide: cr.isLastSide,
     captureMode: cr.captureMode, quality: cr.quality,
     hasDoc: !!cr.documentImage, face: cr.face,
   });
+}
+
+// ── Render helpers ─────────────────────────────────────────────────────────
+
+/** Render a single-side capture into the result area. */
+function renderSingleCapture(urls, quality, face) {
+  if (urls && urls.doc) {
+    showResultImage(urls.doc);
+    capturedTabs.style.display = 'flex';
+    tabDoc.classList.add('active');
+    tabFull.classList.remove('active');
+  } else {
+    showResultImage(urls && urls.full);
+    capturedTabs.style.display = 'none';
+  }
+  renderCapturedQuality(quality, face);
+}
+
+/** Render a two-up grid showing all captured sides. */
+function renderTwoUpCapture(sides) {
+  capturedTabs.style.display      = 'none';
+  capturedQualityEl.style.display = 'none';
+  capturedQualityEl.innerHTML     = '';
+
+  const labels = ['Front', 'Back'];
+  let html = '<div class="two-up">';
+  sides.forEach(function (cr) {
+    const urls   = sideObjectUrls[cr.sideIndex] || {};
+    const imgUrl = urls.doc || urls.full;
+    const lbl    = labels[cr.sideIndex] || ('Side ' + (cr.sideIndex + 1));
+    html += '<div class="two-up-col">';
+    html += imgUrl
+      ? '<img class="two-up-img" src="' + imgUrl + '" alt="' + lbl + '">'
+      : '<div style="min-height:80px;display:flex;align-items:center;justify-content:center;color:#444;font-size:11px;">No image</div>';
+    html += '<div class="two-up-lbl">' + lbl + '</div>';
+    if (cr.quality) {
+      const q    = cr.quality;
+      const fail = q.failing || [];
+      html += '<div class="two-up-quality">';
+      html += badge('Sharp: '  + q.sharpness.toFixed(0)  + '%', !fail.includes('sharpness'));
+      html += badge('Bright: ' + q.brightness.toFixed(0) + '%', !fail.includes('brightness'));
+      html += badge('Glare: '  + q.glare.toFixed(0)      + '%', !fail.includes('glare'));
+      html += badge('Size: '   + q.size.toFixed(0)        + '%', !fail.includes('size'));
+      if (cr.face) {
+        const p = cr.face.present;
+        html += p === null ? '<span class="hbadge neutral">Face: –</span>'
+                           : badge('Face: ' + (p ? 'Yes' : 'No'), p);
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  result.innerHTML = html;
+}
+
+/** Show the flip-card prompt between first and second side scans. */
+function showFlipPrompt(cr) {
+  const urls  = sideObjectUrls[cr.sideIndex] || {};
+  const thumb = urls.doc || urls.full;
+  flipPromptEl.innerHTML =
+    '<div class="flip-check">✅</div>' +
+    '<div class="flip-title">Front side captured!</div>' +
+    (thumb ? '<div class="flip-thumb-wrap"><img src="' + thumb + '" alt="front capture"></div>' : '') +
+    '<div class="flip-instruction">↩&nbsp; Flip the card over, then place the back side in frame</div>' +
+    '<button class="flip-cta" id="flipCtaBtn">Scan Back Side →</button>';
+  flipPromptEl.style.display = '';
+  document.getElementById('flipCtaBtn').addEventListener('click', function () {
+    flipPromptEl.style.display = 'none';
+    if (snap) {
+      snap.nextSide();
+      // Reset the instruction throttle for the fresh side
+      _dispCode = null; _dispHint = ''; _dispEscalated = false; _dispSince = 0;
+    }
+  });
+}
+
+/** Render the step-dots indicator for multi-side scanning. */
+function updateSideSteps(sideIdx, sidesTotal) {
+  if (!sidesTotal || sidesTotal < 2) { sideSteps.style.display = 'none'; return; }
+  const labels = ['FRONT', 'BACK'];
+  let html = '';
+  for (let i = 0; i < sidesTotal; i++) {
+    const isDone   = capturedSides.some(function (c) { return c.sideIndex === i; });
+    const isActive = !isDone && i === sideIdx;
+    const cls      = isDone ? 'done' : isActive ? 'active' : '';
+    if (i > 0) {
+      const prevDone = capturedSides.some(function (c) { return c.sideIndex === i - 1; });
+      html += '<div class="step-connector' + (prevDone ? ' done' : '') + '"></div>';
+    }
+    html +=
+      '<div class="step-item">' +
+        '<div class="step-dot '  + cls + '"></div>' +
+        '<div class="step-lbl '  + cls + '">' + (labels[i] || 'SIDE ' + (i + 1)) + '</div>' +
+      '</div>';
+  }
+  sideSteps.style.display = 'flex';
+  sideSteps.innerHTML = html;
 }
 
 function handleError(err) {
@@ -995,7 +1195,7 @@ function renderCapturedQuality(q, face) {
 function addToHistory(cr) {
   const thumbUrl = cr.documentImage ? URL.createObjectURL(cr.documentImage) : null;
   captureHistory.unshift({
-    id: Date.now(), timestamp: new Date(),
+    id: Date.now(), timestamp: cr.timestamp,
     thumbUrl, quality: cr.quality, face: cr.face, sideIndex: cr.sideIndex,
   });
   while (captureHistory.length > MAX_HISTORY) {
@@ -1067,25 +1267,23 @@ function resetResultPanel() {
   capturedTabs.style.display      = 'none';
   capturedQualityEl.style.display = 'none';
   capturedQualityEl.innerHTML     = '';
-  nextSideBtn.style.display       = 'none';
   scoreEl.textContent             = '–';
   scoreEl.style.color             = '#fff';
   hintBox.style.display           = 'none';
   banner.style.display            = 'none';
   banner.textContent              = '';
-}
-
-function updateSideIndicator(idx, total) {
-  sideIndicator.style.display = '';
-  const labels = ['Front', 'Back'];
-  sideIndicator.textContent =
-    'Side ' + (idx + 1) + ' of ' + total +
-    (labels[idx] ? ' (' + labels[idx] + ')' : '');
+  capturedSides                   = [];
+  flipPromptEl.style.display      = 'none';
+  sideSteps.style.display         = 'none';
+  sideSteps.innerHTML             = '';
 }
 
 function revokeCapturedUrls() {
-  if (capturedImages.full) { URL.revokeObjectURL(capturedImages.full); capturedImages.full = null; }
-  if (capturedImages.doc)  { URL.revokeObjectURL(capturedImages.doc);  capturedImages.doc  = null; }
+  sideObjectUrls.forEach(function (u) {
+    if (u && u.full) URL.revokeObjectURL(u.full);
+    if (u && u.doc)  URL.revokeObjectURL(u.doc);
+  });
+  sideObjectUrls = [];
 }
 
 // ── Button handlers ────────────────────────────────────────────────────────
@@ -1106,21 +1304,15 @@ stopBtn.addEventListener('click', () => {
 
 captureBtn.addEventListener('click', () => { if (snap) snap.capture(); });
 
-nextSideBtn.addEventListener('click', () => {
-  if (snap) {
-    nextSideBtn.style.display = 'none';
-    snap.nextSide();
-    updateSideIndicator(activeSide + 1, buildConfig().sides);
-  }
-});
-
 tabFull.addEventListener('click', () => {
   tabFull.classList.add('active'); tabDoc.classList.remove('active');
-  showResultImage(capturedImages.full);
+  const u = sideObjectUrls[activeSide];
+  showResultImage(u && u.full);
 });
 tabDoc.addEventListener('click', () => {
   tabDoc.classList.add('active'); tabFull.classList.remove('active');
-  showResultImage(capturedImages.doc);
+  const u = sideObjectUrls[activeSide];
+  showResultImage(u && u.doc);
 });
 
 applyConfig.addEventListener('click', () => {
