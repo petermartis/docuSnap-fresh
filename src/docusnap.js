@@ -1,4 +1,4 @@
-/*! docuSnap v2.1.0 | (c) ColonelParrot and other contributors | MIT License */
+/*! docuSnap v3.0.0 | (c) ColonelParrot and other contributors | MIT License */
 
 (function (global, factory) {
   if (typeof exports === "object" && typeof module !== "undefined") {
@@ -11,11 +11,7 @@
           : typeof self !== "undefined" ? self
           : typeof window !== "undefined" ? window
           : global;
-    g.docuSnap = exported.docuSnap;
-    g.DocumentAutoCapture = exported.DocumentAutoCapture;
-    g.DocumentCaptureFallback = exported.DocumentCaptureFallback;
-    g.SmartDocumentCapture = exported.SmartDocumentCapture;
-    g.CaptureCapability = exported.CaptureCapability;
+    g.DocuSnap = exported.DocuSnap;
   }
 })(this, function () {
   "use strict";
@@ -1642,6 +1638,8 @@
       this._onCapture = options.onCapture;
       this._onStateChange = options.onStateChange || function () { };
       this._onQualityReport = options.onQualityReport || function () { };
+      this._onFrameData = options.onFrameData || null;  // Raw frame hook for DocuSnap API layer
+      this._manualMode = options.manualMode || false;   // If true, never auto-fire capture
 
       this._state = State.IDLE;
       this._consecutiveGoodFrames = 0;
@@ -1693,6 +1691,24 @@
     reset() {
       this.stop();
       this.start();
+    }
+
+    /**
+     * Manually trigger a capture immediately.
+     * Works in both auto-detect and manual modes.
+     * In manual mode (manualMode:true) this is the only way to fire a capture.
+     */
+    capture() {
+      if (this._state === State.IDLE || this._state === State.CAPTURED) return;
+      // Ensure at least one candidate exists (use stable corners from Kalman smoother)
+      if (this._candidates.length === 0) {
+        this._candidates.push({
+          sharpness:   0,
+          fullCorners: this._stableCorners || null,
+          report:      null,
+        });
+      }
+      this._selectBestFrame();
     }
 
     getState() {
@@ -1867,10 +1883,23 @@
             report:      report,
           });
 
-          if (performance.now() - this._stayStillStart >= this._stayStillMs) {
+          if (!this._manualMode && performance.now() - this._stayStillStart >= this._stayStillMs) {
             this._selectBestFrame();
           }
         }
+      }
+
+      // ── Raw frame data callback (DocuSnap public API layer) ───────────
+      // Fired after state machine so `state` reflects any transition this tick.
+      if (this._onFrameData) {
+        this._onFrameData({
+          detCanvas:   detCanvas,
+          detCorners:  detCorners,
+          dispCorners: dispCorners,
+          fullCorners: fullCorners,
+          state:       this._state,
+          report:      report,
+        });
       }
     }
 
@@ -2583,11 +2612,634 @@
     }
   }
 
+  // ===========================================================================
+  // _FaceDetector — internal face presence detector
+  //
+  // Priority:
+  //   1. window.FaceDetector (Shape Detection API — Chrome/Edge, zero bundle cost)
+  //   2. pico.js from jsdelivr CDN  (~53 KB pure-JS Viola-Jones, universal fallback)
+  //   3. unavailable → returns { present: null }
+  //
+  // Detection is throttled to every _throttleN frames and scoped to the
+  // document bounding box crop to minimise cost and false positives.
+  // ===========================================================================
+
+  function _FaceDetector(config) {
+    config = config || {};
+    this._minConfidence = config.minConfidence != null ? config.minConfidence : 0.6;
+    this._throttleN     = 3;       // run every N frames
+    this._frameCount    = 0;
+    this._lastResult    = null;    // cached between throttled frames
+    this._method        = null;    // 'native' | 'pico' | null
+    this._nativeDetector = null;
+    this._picoCascade   = null;
+  }
+
+  _FaceDetector.prototype.isAvailable = function () {
+    return this._method !== null;
+  };
+
+  /** Try each detection backend in order. Returns true when one is ready. */
+  _FaceDetector.prototype.init = async function () {
+    // 1. Shape Detection API
+    if (typeof window !== 'undefined' && window.FaceDetector) {
+      try {
+        var fd = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+        this._nativeDetector = fd;
+        this._method = 'native';
+        return true;
+      } catch (e) { /* Feature-Policy disabled or not supported */ }
+    }
+    // 2. pico.js from CDN
+    try {
+      await this._loadPico();
+      this._method = 'pico';
+      return true;
+    } catch (e) {
+      console.warn('[DocuSnap] face detection unavailable (pico.js CDN load failed):', e.message);
+    }
+    this._method = null;
+    return false;
+  };
+
+  _FaceDetector.prototype._loadPico = function () {
+    var self = this;
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () { reject(new Error('timeout')); }, 10000);
+
+      function fail(msg) { clearTimeout(timer); reject(new Error(msg)); }
+
+      // Step 1: runtime script
+      var script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/gh/nenadmarkus/picojs@c2a16ac/pico.js';
+      script.onerror = function () { fail('pico.js script failed'); };
+      script.onload = function () {
+        if (typeof pico === 'undefined') { return fail('pico not defined'); }
+        // Step 2: face cascade (binary file)
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', 'https://cdn.jsdelivr.net/gh/nenadmarkus/picojs@c2a16ac/examples/facefinder', true);
+        xhr.responseType = 'arraybuffer';
+        xhr.onerror = function () { fail('cascade fetch failed'); };
+        xhr.onload  = function () {
+          try {
+            self._picoCascade = pico.unpack_cascade(new Uint8Array(xhr.response));
+            clearTimeout(timer);
+            resolve();
+          } catch (e) { fail(e.message); }
+        };
+        xhr.send();
+      };
+      document.head.appendChild(script);
+    });
+  };
+
+  /**
+   * Detect faces in canvas, optionally cropped to the document bounding box.
+   * Throttled: returns cached result on non-sampled frames.
+   * @param {HTMLCanvasElement} canvas
+   * @param {object|null} cropBox  { x, y, width, height } in canvas pixel coords
+   * @returns {{ present: bool|null, confidence: number, bounds: object|null }}
+   */
+  _FaceDetector.prototype.detect = async function (canvas, cropBox) {
+    this._frameCount++;
+    if (this._frameCount % this._throttleN !== 0) {
+      return this._lastResult;  // cached
+    }
+    if (!this._method) return null;
+    try {
+      var result = (this._method === 'native')
+        ? await this._detectNative(canvas, cropBox)
+        : this._detectPico(canvas, cropBox);
+      this._lastResult = result;
+      return result;
+    } catch (e) {
+      console.warn('[DocuSnap] face detect error:', e);
+      return this._lastResult;
+    }
+  };
+
+  _FaceDetector.prototype._detectNative = async function (canvas, cropBox) {
+    var src = canvas;
+    var offsetX = 0, offsetY = 0;
+    // Crop to document region to reduce false positives from background
+    if (cropBox && cropBox.width > 4 && cropBox.height > 4) {
+      var cc = document.createElement('canvas');
+      cc.width  = Math.round(cropBox.width);
+      cc.height = Math.round(cropBox.height);
+      cc.getContext('2d').drawImage(
+        canvas,
+        cropBox.x, cropBox.y, cropBox.width, cropBox.height,
+        0, 0, cc.width, cc.height
+      );
+      src = cc;
+      offsetX = cropBox.x;
+      offsetY = cropBox.y;
+    }
+    var faces = await this._nativeDetector.detect(src);
+    if (!faces || faces.length === 0) {
+      return { present: false, confidence: 0, bounds: null };
+    }
+    var bb = faces[0].boundingBox;
+    return {
+      present:    true,
+      confidence: 1.0,
+      bounds: { x: bb.x + offsetX, y: bb.y + offsetY, width: bb.width, height: bb.height },
+    };
+  };
+
+  _FaceDetector.prototype._detectPico = function (canvas, cropBox) {
+    if (!this._picoCascade) return null;
+    // pico.js expects a greyscale image + the run_cascade function
+    var ctx = canvas.getContext('2d');
+    var cw = canvas.width, ch = canvas.height;
+    var rgbaData = ctx.getImageData(0, 0, cw, ch).data;
+    var gray = new Uint8Array(cw * ch);
+    for (var i = 0; i < cw * ch; i++) {
+      gray[i] = (77 * rgbaData[i * 4] + 150 * rgbaData[i * 4 + 1] + 29 * rgbaData[i * 4 + 2]) >> 8;
+    }
+    var image = { pixels: gray, nrows: ch, ncols: cw, ldim: cw };
+    // Restrict search area to document crop if provided
+    var params = {
+      shiftfactor: 0.1, minsize: 20, maxsize: 400, scalefactor: 1.1,
+    };
+    var cascade = this._picoCascade;
+    var dets = pico.run_cascade(image, cascade, params, null) || [];
+    var minConf = this._minConfidence;
+    dets = dets.filter(function (d) { return d[3] > minConf; });
+    if (!dets.length) return { present: false, confidence: 0, bounds: null };
+    var best = dets.reduce(function (a, b) { return a[3] > b[3] ? a : b; });
+    var r = best[0], c = best[1], s = best[2];
+    var ox = cropBox ? cropBox.x : 0;
+    var oy = cropBox ? cropBox.y : 0;
+    return {
+      present:    true,
+      confidence: Math.min(1, best[3]),
+      bounds:     { x: c - s / 2 + ox, y: r - s / 2 + oy, width: s, height: s },
+    };
+  };
+
+  // ===========================================================================
+  // DocuSnap — Clean public API (single integration entry point)
+  //
+  // Wraps DocumentAutoCapture + DocumentCaptureFallback + _FaceDetector with:
+  //   – normalized 0-100 quality values
+  //   – multi-side scanning  (sides: 1 | 2)
+  //   – face detection       (Shape Detection API + pico.js CDN fallback)
+  //   – Blob image output    (not data URLs)
+  //   – instructionCode + hintEscalated pattern (inspired by Innovatrics DOT SDK)
+  //   – automatic captureMode routing  (smart / auto / file)
+  // ===========================================================================
+
+  var InstructionCode = {
+    SEARCHING:        'SEARCHING',
+    MOVE_CLOSER:      'MOVE_CLOSER',
+    HOLD_STILL:       'HOLD_STILL',
+    REDUCE_GLARE:     'REDUCE_GLARE',
+    IMPROVE_LIGHTING: 'IMPROVE_LIGHTING',
+    SHARPEN:          'SHARPEN',
+    CENTER_DOCUMENT:  'CENTER_DOCUMENT',
+    CONFIRMED:        'CONFIRMED',
+  };
+
+  class DocuSnap {
+    /**
+     * @param {object}   options
+     * @param {string}   [options.documentType='any']     'id' | 'passport' | 'document' | 'any'
+     * @param {string}   [options.captureMode='smart']    'smart' | 'auto' | 'manual' | 'file'
+     * @param {number}   [options.sides=1]                1 | 2
+     * @param {Array}    [options.sideConfig]             Per-side overrides [{ documentType, quality, face }]
+     * @param {object}   [options.quality]                { sharpness, brightness, glare, size } (all 0-100)
+     * @param {object}   [options.face]                   { detect, requirePresent, minConfidence }
+     * @param {Element}  [options.fallbackContainer]      Container element for file-capture UI
+     * @param {function} options.onCapture                function(CaptureResult)
+     * @param {function} [options.onFrame]                function(FrameResult)
+     * @param {function} [options.onError]                function(DocuSnapError)
+     */
+    constructor(options) {
+      options = options || {};
+      // — Configuration —
+      this.documentType      = options.documentType      || 'any';
+      this.captureMode       = options.captureMode       || 'smart';
+      this.sides             = options.sides             || 1;
+      this.sideConfig        = options.sideConfig        || [];
+      this.quality           = options.quality           || {};
+      this.faceConfig        = options.face              || { detect: false };
+      this._fallbackContainer = options.fallbackContainer || null;
+      // — Callbacks —
+      this._onCapture = options.onCapture || function () {};
+      this._onFrame   = options.onFrame   || function () {};
+      this._onError   = options.onError   || function () {};
+      // — Runtime state —
+      this._currentSide       = 0;
+      this._capturedSides     = [];
+      this._scanState         = 'idle';
+      this._actualCaptureMode = null;
+      this._videoElement      = null;
+      this._canvasElement     = null;
+      this._thresholds        = {};
+      // — Internal components —
+      this._core          = null;   // low-level docuSnap (scanner)
+      this._autoCapture   = null;
+      this._fallback      = null;
+      this._faceDetector  = null;
+      // — Hint escalation —
+      this._lastCode        = null;
+      this._codeRepeatCount = 0;
+      this._ESCALATE_AFTER  = 8;  // frames before hint is considered "escalated"
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    /**
+     * Initialise and start capture.
+     * @param {HTMLVideoElement}  videoElement   Required for auto mode; unused for file mode.
+     * @param {HTMLCanvasElement} canvasElement  Display canvas (overlay rendered here).
+     * @returns {Promise<void>}
+     */
+    async start(videoElement, canvasElement) {
+      this._scanState     = 'initializing';
+      this._currentSide   = 0;
+      this._capturedSides = [];
+      this._videoElement  = videoElement;
+      this._canvasElement = canvasElement;
+
+      // Build thresholds from current side config
+      this._thresholds = this._buildThresholds(this._currentSideConfig());
+
+      // Initialise low-level scanner with aspect limits from document type
+      var limits = this._aspectLimits(this._currentSideDocType());
+      this._core = new docuSnap({
+        minAspectRatio: limits.min,
+        maxAspectRatio: limits.max,
+      });
+      await this._core.init();
+
+      // Initialise face detector if any side requires it
+      if (this._needsFaceDetection()) {
+        this._faceDetector = new _FaceDetector({
+          minConfidence: (this.faceConfig.minConfidence != null ? this.faceConfig.minConfidence : 0.6),
+        });
+        await this._faceDetector.init();
+      }
+
+      // Route to correct capture mode.
+      // If videoElement is null the caller has no stream — force file mode regardless of
+      // what CaptureCapability.detect() says (e.g. after a runtime getUserMedia failure).
+      var capability = (videoElement && this.captureMode !== 'file')
+        ? CaptureCapability.detect()
+        : 'file';
+      if (this.captureMode === 'file' || !videoElement) {
+        this._actualCaptureMode = 'file';
+      } else {
+        // 'smart' | 'auto' | 'manual' all fall back to file when camera unavailable
+        this._actualCaptureMode = (capability === 'auto') ? 'auto' : 'file';
+      }
+
+      this._scanState = 'ready';
+      if (this._actualCaptureMode === 'auto') {
+        this._startAutoCapture();
+      } else {
+        this._startFileCapture();
+      }
+    }
+
+    /** Manually trigger a capture (use when captureMode:'manual'). */
+    capture() {
+      if (this._autoCapture) {
+        this._autoCapture.capture();
+      }
+    }
+
+    /** Advance to next document side. Call from onCapture when sides > 1. */
+    nextSide() {
+      if (this._currentSide >= this.sides - 1) return;
+      this._currentSide++;
+      this._lastCode        = null;
+      this._codeRepeatCount = 0;
+      this._scanState       = 'ready';
+      // Rebuild thresholds for the new side
+      this._thresholds = this._buildThresholds(this._currentSideConfig());
+      if (this._autoCapture) {
+        this._autoCapture._thresholds = this._thresholds;
+        this._autoCapture.reset();
+      } else if (this._fallback) {
+        this._fallback._thresholds = this._thresholds;
+        this._fallback.start();
+      }
+    }
+
+    /** Pause the live-stream capture loop. */
+    pause() {
+      if (this._autoCapture && this._scanState !== 'captured') {
+        this._autoCapture.stop();
+        this._scanState = 'paused';
+      }
+    }
+
+    /** Resume from paused state. */
+    resume() {
+      if (this._scanState === 'paused' && this._autoCapture) {
+        this._scanState = 'ready';
+        this._autoCapture.start();
+      }
+    }
+
+    /** Reset to initial state for the first side. */
+    reset() {
+      this._currentSide     = 0;
+      this._capturedSides   = [];
+      this._lastCode        = null;
+      this._codeRepeatCount = 0;
+      this._scanState       = 'ready';
+      if (this._autoCapture) {
+        this._autoCapture.reset();
+      } else if (this._fallback) {
+        this._fallback.start();
+      }
+    }
+
+    /** Stop capture and release all resources. */
+    destroy() {
+      this._scanState = 'idle';
+      if (this._autoCapture) { this._autoCapture.stop(); this._autoCapture = null; }
+      if (this._fallback)    { this._fallback.stop();    this._fallback    = null; }
+      this._core         = null;
+      this._faceDetector = null;
+    }
+
+    // ── Private: setup ─────────────────────────────────────────────────────────
+
+    _startAutoCapture() {
+      var self = this;
+      var isManual = (this.captureMode === 'manual');
+      this._autoCapture = new DocumentAutoCapture({
+        scanner:                 this._core,
+        videoElement:            this._videoElement,
+        canvasElement:           this._canvasElement,
+        thresholds:              this._thresholds,
+        consecutiveFramesNeeded: isManual ? 5 : 5,
+        stayStillDurationMs:     isManual ? 999999 : 1000,  // never auto-fires in manual mode
+        frameIntervalMs:         66,
+        manualMode:              isManual,
+        onFrameData: function (raw) { self._handleFrameData(raw); },
+        onCapture:   function (raw) { self._handleAutoCapture(raw); },
+        onStateChange:   function () {},   // handled via onFrameData
+        onQualityReport: function () {},   // handled via onFrameData
+      });
+      this._autoCapture.start();
+    }
+
+    _startFileCapture() {
+      if (!this._fallbackContainer) {
+        // Emit a synthetic first frame so the caller knows we're in file mode
+        this._onFrame({
+          state: 'searching', instructionCode: InstructionCode.SEARCHING,
+          hint: 'Tap to take a photo of the document', hintEscalated: false,
+          quality: { sharpness: 0, brightness: 0, glare: 0, size: 0, failing: [] },
+          corners: null, face: null,
+          captureMode: 'file', sideIndex: this._currentSide, sidesTotal: this.sides,
+        });
+        return;
+      }
+      var self = this;
+      this._fallback = new DocumentCaptureFallback({
+        scanner:          this._core,
+        containerElement: this._fallbackContainer,
+        thresholds:       this._thresholds,
+        allowSkipQuality: true,
+        onCapture: function (raw) { self._handleFallbackCapture(raw); },
+        onQualityReport: function (report) {
+          var q = self._normalizeQuality(report);
+          self._onFrame({
+            state: report.allPassed ? 'confirming' : 'searching',
+            instructionCode: report.allPassed ? InstructionCode.CONFIRMED : InstructionCode.SEARCHING,
+            hint: report.allPassed ? 'Quality check passed — tap to use' : 'Retake to improve quality',
+            hintEscalated: false,
+            quality: q, corners: null, face: null,
+            captureMode: 'file', sideIndex: self._currentSide, sidesTotal: self.sides,
+          });
+        },
+      });
+      this._fallback.start();
+    }
+
+    // ── Private: frame handling ────────────────────────────────────────────────
+
+    async _handleFrameData(raw) {
+      if (this._scanState === 'idle' || this._scanState === 'captured') return;
+
+      // Instruction code and hint
+      var code      = this._deriveInstructionCode(raw.report, raw.state);
+      var hint      = this._codeToHint(code);
+      var escalated = false;
+      if (code === this._lastCode) {
+        this._codeRepeatCount++;
+        if (this._codeRepeatCount >= this._ESCALATE_AFTER) escalated = true;
+      } else {
+        this._lastCode        = code;
+        this._codeRepeatCount = 0;
+      }
+      if (raw.state === State.STAY_STILL || raw.state === State.CAPTURED) {
+        this._scanState = 'confirming';
+      } else {
+        this._scanState = 'ready';
+      }
+
+      // Normalized quality
+      var q = this._normalizeQuality(raw.report);
+
+      // Face detection (throttled, scoped to document crop on the 640px det canvas)
+      var faceResult = null;
+      if (this._faceDetector && raw.detCanvas && raw.detCorners) {
+        var cropBox = this._cornersToCropBox(raw.detCorners, raw.detCanvas.width, raw.detCanvas.height);
+        faceResult = await this._faceDetector.detect(raw.detCanvas, cropBox);
+      }
+
+      this._onFrame({
+        state:           this._scanState,
+        instructionCode: code,
+        hint:            hint,
+        hintEscalated:   escalated,
+        quality:         q,
+        corners:         raw.fullCorners,
+        face:            faceResult,
+        captureMode:     this._actualCaptureMode,
+        sideIndex:       this._currentSide,
+        sidesTotal:      this.sides,
+      });
+    }
+
+    _handleAutoCapture(rawResult) {
+      var self = this;
+      this._scanState = 'captured';
+      this._buildCaptureResult(rawResult, 'auto').then(function (cr) {
+        self._capturedSides.push(cr);
+        self._onCapture(cr);
+      }).catch(function (err) {
+        self._onError({ code: 'CAPTURE_ERROR', message: err.message, cause: err });
+      });
+    }
+
+    _handleFallbackCapture(rawResult) {
+      var self = this;
+      this._scanState = 'captured';
+      this._buildCaptureResult(rawResult, 'file').then(function (cr) {
+        self._capturedSides.push(cr);
+        self._onCapture(cr);
+      }).catch(function (err) {
+        self._onError({ code: 'CAPTURE_ERROR', message: err.message, cause: err });
+      });
+    }
+
+    // ── Private: result builders ───────────────────────────────────────────────
+
+    async _buildCaptureResult(rawResult, captureMode) {
+      var sideIndex  = this._currentSide;
+      var isLastSide = sideIndex === this.sides - 1;
+
+      // Convert data URLs / blob URLs to Blobs
+      var imageBlob    = rawResult.imageData
+        ? await this._toBlob(rawResult.imageData) : null;
+      var documentBlob = rawResult.extractedData
+        ? await this._toBlob(rawResult.extractedData) : null;
+
+      var q = rawResult.qualityReport
+        ? this._normalizeQuality(rawResult.qualityReport)
+        : { sharpness: 0, brightness: 0, glare: 0, size: 0, failing: [] };
+
+      var faceResult = this._faceDetector ? this._faceDetector._lastResult : null;
+
+      return {
+        image:         imageBlob,
+        documentImage: documentBlob,
+        corners:       rawResult.cornerPoints || null,
+        quality:       q,
+        sideIndex:     sideIndex,
+        sidesTotal:    this.sides,
+        isLastSide:    isLastSide,
+        captureMode:   captureMode || this._actualCaptureMode,
+        timestamp:     new Date(),
+        face:          faceResult,
+      };
+    }
+
+    // ── Private: helpers ───────────────────────────────────────────────────────
+
+    /** Convert normalized quality config (0-100) to internal raw thresholds. */
+    _buildThresholds(sideConf) {
+      var q = Object.assign({}, this.quality, (sideConf && sideConf.quality) || {});
+      return {
+        sharpnessMin:    ((q.sharpness  != null ? q.sharpness  : 50) / 100) * 219,
+        brightnessMin:   ((q.brightness != null ? q.brightness : 40) / 100) * 178,
+        glareMax:        (q.glare          != null ? q.glare          : 10)  / 100,
+        glareThreshold:   q.glareThreshold != null ? q.glareThreshold : 200,
+        documentSizeMin: (q.size  != null ? q.size  : 30) / 100,
+        cornerMarginPx:  10,
+      };
+    }
+
+    /** Normalize raw quality report values to 0-100 integers. */
+    _normalizeQuality(report) {
+      if (!report || !report.checks) {
+        return { sharpness: 0, brightness: 0, glare: 0, size: 0, failing: [] };
+      }
+      var c = report.checks;
+      var failing = [];
+      if (!c.sharpness.pass)         failing.push('sharpness');
+      if (!c.brightness.pass)        failing.push('brightness');
+      if (!c.glare.pass)             failing.push('glare');
+      if (!c.documentSize.pass)      failing.push('size');
+      if (!c.cornersFound.pass)      failing.push('corners');
+      return {
+        sharpness:  Math.min(100, Math.round((c.sharpness.value  / 219) * 100)),
+        brightness: Math.min(100, Math.round((c.brightness.value / 178) * 100)),
+        glare:      Math.min(100, Math.round(c.glare.value * 100)),
+        size:       Math.min(100, Math.round(c.documentSize.value * 100)),
+        failing:    failing,
+      };
+    }
+
+    _deriveInstructionCode(report, internalState) {
+      if (internalState === State.STAY_STILL) return InstructionCode.HOLD_STILL;
+      if (!report || !report.checks)          return InstructionCode.SEARCHING;
+      var c = report.checks;
+      if (!c.cornersFound.pass)        return InstructionCode.SEARCHING;
+      if (!c.cornersWithinMargin.pass) return InstructionCode.CENTER_DOCUMENT;
+      if (!c.documentSize.pass)        return InstructionCode.MOVE_CLOSER;
+      if (!c.sharpness.pass)           return InstructionCode.SHARPEN;
+      if (!c.glare.pass)               return InstructionCode.REDUCE_GLARE;
+      if (!c.brightness.pass)          return InstructionCode.IMPROVE_LIGHTING;
+      return InstructionCode.CONFIRMED;
+    }
+
+    _codeToHint(code) {
+      var map = {};
+      map[InstructionCode.SEARCHING]        = 'Position document in frame';
+      map[InstructionCode.MOVE_CLOSER]      = 'Move closer to document';
+      map[InstructionCode.HOLD_STILL]       = 'Hold still\u2026';
+      map[InstructionCode.REDUCE_GLARE]     = 'Reduce glare \u2014 tilt document slightly';
+      map[InstructionCode.IMPROVE_LIGHTING] = 'Too dark \u2014 improve lighting';
+      map[InstructionCode.SHARPEN]          = 'Hold steady \u2014 image is blurry';
+      map[InstructionCode.CENTER_DOCUMENT]  = 'Move document away from edges';
+      map[InstructionCode.CONFIRMED]        = 'Document detected \u2014 hold still';
+      return map[code] || 'Position document in frame';
+    }
+
+    _aspectLimits(docType) {
+      var m = { id: { min: 1.4, max: 1.8 }, passport: { min: 1.2, max: 1.6 },
+                document: { min: 1.0, max: 2.0 }, any: { min: 1.2, max: 1.8 } };
+      return m[docType] || m.any;
+    }
+
+    _currentSideConfig() { return this.sideConfig[this._currentSide] || null; }
+
+    _currentSideDocType() {
+      var sc = this._currentSideConfig();
+      return (sc && sc.documentType) || this.documentType;
+    }
+
+    _needsFaceDetection() {
+      if (this.faceConfig && this.faceConfig.detect) return true;
+      return this.sideConfig.some(function (sc) { return sc && sc.face && sc.face.detect; });
+    }
+
+    /** Compute axis-aligned bounding box of detected corners (in canvas pixel space). */
+    _cornersToCropBox(corners, w, h) {
+      if (!corners) return null;
+      var xs = [corners.topLeftCorner.x, corners.topRightCorner.x,
+                corners.bottomRightCorner.x, corners.bottomLeftCorner.x];
+      var ys = [corners.topLeftCorner.y, corners.topRightCorner.y,
+                corners.bottomRightCorner.y, corners.bottomLeftCorner.y];
+      var x  = Math.max(0, Math.min.apply(null, xs));
+      var y  = Math.max(0, Math.min.apply(null, ys));
+      var x2 = Math.min(w, Math.max.apply(null, xs));
+      var y2 = Math.min(h, Math.max.apply(null, ys));
+      return { x: x, y: y, width: x2 - x, height: y2 - y };
+    }
+
+    /** Convert a data: or blob: URL to a Blob. */
+    async _toBlob(url) {
+      if (!url) return null;
+      if (url.startsWith('blob:')) {
+        try { return await (await fetch(url)).blob(); } catch (e) { return null; }
+      }
+      // data: URL
+      var sep  = url.indexOf(',');
+      var mime = url.substring(5, url.indexOf(';'));
+      var bin  = atob(url.substring(sep + 1));
+      var arr  = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return new Blob([arr], { type: mime });
+    }
+  }
+
+  /** Static constants for convenient import-free usage. */
+  DocuSnap.InstructionCode = InstructionCode;
+
+  /** Returns 'auto' (live camera available) or 'file' (use file-input). */
+  DocuSnap.detectCapability = function () { return CaptureCapability.detect(); };
+
   return {
-    docuSnap: docuSnap,
-    DocumentAutoCapture: DocumentAutoCapture,
-    DocumentCaptureFallback: DocumentCaptureFallback,
-    SmartDocumentCapture: SmartDocumentCapture,
-    CaptureCapability: CaptureCapability,
+    DocuSnap: DocuSnap,
   };
 });
