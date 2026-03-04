@@ -2967,9 +2967,10 @@
       }
     }
 
-    /** Pause the live-stream capture loop. */
+    /** Pause the live-stream capture loop.
+     *  Safe to call from any state including from within an onCapture handler. */
     pause() {
-      if (this._autoCapture && this._scanState !== 'captured') {
+      if (this._autoCapture && this._scanState !== 'idle' && this._scanState !== 'paused') {
         this._autoCapture.stop();
         this._scanState = 'paused';
       }
