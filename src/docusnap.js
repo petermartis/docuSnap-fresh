@@ -3051,14 +3051,15 @@
       // Face detection (throttled, scoped to document crop on the 640px det canvas)
       var faceResult = null;
       if (this._faceDetector) {
+        var detected = null;
         if (raw.detCanvas && raw.detCorners) {
           var cropBox = this._cornersToCropBox(raw.detCorners, raw.detCanvas.width, raw.detCanvas.height);
-          faceResult = await this._faceDetector.detect(raw.detCanvas, cropBox);
-        } else {
-          // Detector is active but document not yet located — emit a neutral result
-          // so the UI can still show the Face Present row in the quality panel.
-          faceResult = { present: null, confidence: null, bounds: null };
+          detected = await this._faceDetector.detect(raw.detCanvas, cropBox);
         }
+        // Always emit at least { present: null } when the detector is active so the
+        // UI face row stays visible.  detect() can return null on throttled frames
+        // (before the first real sample) or when no backend loaded.
+        faceResult = detected || { present: null, confidence: null, bounds: null };
       }
 
       // Gate auto-capture: if face presence is required and face is not yet confirmed,
