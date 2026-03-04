@@ -1946,7 +1946,7 @@
           var _rigH  = Math.hypot(cp.bottomRightCorner.x - cp.topRightCorner.x, cp.bottomRightCorner.y - cp.topRightCorner.y);
           var _avgW  = (_topW + _botW) / 2;
           var _avgH  = (_lefH + _rigH) / 2;
-          var _longSide = 856;
+          var _longSide = 1920;
           var docWidth  = _avgW >= _avgH ? _longSide : Math.round(_longSide * _avgW / _avgH);
           var docHeight = _avgW >= _avgH ? Math.round(_longSide * _avgH / _avgW) : _longSide;
           var extracted = await self._scanner.extractPaper(img, docWidth, docHeight, cp, { margin: 0.25 });
@@ -2499,7 +2499,7 @@
               var _rigH = Math.hypot(cp.bottomRightCorner.x - cp.topRightCorner.x,   cp.bottomRightCorner.y - cp.topRightCorner.y);
               var _avgW = (_topW + _botW) / 2;
               var _avgH = (_lefH + _rigH) / 2;
-              var _longSide = 856;
+              var _longSide = 1920;
               var docWidth  = _avgW >= _avgH ? _longSide : Math.round(_longSide * _avgW / _avgH);
               var docHeight = _avgW >= _avgH ? Math.round(_longSide * _avgH / _avgW) : _longSide;
               // imageSource (full-res ImageBitmap or HTMLImageElement) is used here
