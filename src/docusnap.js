@@ -1495,8 +1495,9 @@
      * @param {object} [thresholds]
      * @returns {object} quality report
      */
-    assessQuality(rgba, w, h, cornerPoints, thresholds) {
+    assessQuality(rgba, w, h, cornerPoints, thresholds, detConfidence) {
       thresholds = thresholds || {};
+      detConfidence = detConfidence || 0;
       var sharpnessMin = thresholds.sharpnessMin !== undefined ? thresholds.sharpnessMin : 100;
       var brightnessMin = thresholds.brightnessMin !== undefined ? thresholds.brightnessMin : 40;
       var glareMax = thresholds.glareMax !== undefined ? thresholds.glareMax : 0.10;
@@ -1505,6 +1506,10 @@
       var glareThreshold = thresholds.glareThreshold !== undefined ? thresholds.glareThreshold : 248;
       var documentSizeMin = thresholds.documentSizeMin !== undefined ? thresholds.documentSizeMin : 0.15;
       var cornerMarginPx = thresholds.cornerMarginPx !== undefined ? thresholds.cornerMarginPx : 10;
+      // Minimum edge-support confidence from the rectangle detector.
+      // 0.15 = detector's internal floor; 0.30 = stronger gate to reject false positives
+      // (e.g. bags, clothing edges) that pass sharpness/brightness but aren't real documents.
+      var confidenceMin = thresholds.confidenceMin !== undefined ? thresholds.confidenceMin : 0.30;
 
       // Convert to grayscale once, reuse for all quality checks
       var gray = this._quality.rgbaToGrayscale(rgba, w, h);
@@ -1529,6 +1534,7 @@
         cornersFound: { value: completeness.allCornersFound, pass: completeness.allCornersFound },
         cornersWithinMargin: { value: completeness.allWithinMargin, pass: completeness.allWithinMargin },
         documentSize: { value: documentSize, pass: documentSize >= documentSizeMin },
+        confidence: { value: detConfidence, pass: detConfidence >= confidenceMin },
       };
 
       var allPassed = true;
@@ -1601,6 +1607,8 @@
       this._state = State.IDLE;
       this._consecutiveGoodFrames = 0;
       this._candidates = [];
+      this._frameBuffer = [];          // Rolling buffer of last N frames with quality
+      this._frameBufferSize = options.frameBufferSize || 10;
       this._stayStillStart = 0;
       this._animFrameId = null;
       this._lastEvalTime = 0;
@@ -1642,6 +1650,7 @@
       this._state = State.DETECTING;
       this._consecutiveGoodFrames = 0;
       this._candidates = [];
+      this._frameBuffer = [];
       this._evaluating = false;
       this._stableCorners = null;
       this._stableFullCorners = null;
@@ -1907,9 +1916,10 @@
       // ── Detect + assess at detection resolution ────────────────────────
       var detection  = this._scanner._detector.detect(imageData.data, detW, detH);
       var detCorners = detection ? detection.cornerPoints : null;
+      var detConfidence = detection ? detection.confidence : 0;
 
       var report = this._scanner.assessQuality(
-        imageData.data, detW, detH, detCorners, this._thresholds
+        imageData.data, detW, detH, detCorners, this._thresholds, detConfidence
       );
       this._onQualityReport(report);
 
@@ -1947,15 +1957,35 @@
       this._lastDispH  = dispH;
       this._lastReport = report;
 
+      // ── Rolling frame buffer — always push passing frames ────────────
+      if (report.allPassed) {
+        this._frameBuffer.push({
+          sharpness:   report.checks.sharpness.value,
+          fullCorners: fullCorners,
+          report:      report,
+          timestamp:   performance.now(),
+        });
+        while (this._frameBuffer.length > this._frameBufferSize) {
+          this._frameBuffer.shift();
+        }
+      }
+
       // ── State machine ──────────────────────────────────────────────────
       if (this._state === State.DETECTING) {
         if (report.allPassed) {
           this._consecutiveGoodFrames++;
           if (this._consecutiveGoodFrames >= this._consecutiveNeeded) {
-            this._state = State.STAY_STILL;
-            this._stayStillStart = performance.now();
-            this._candidates = [];
-            this._onStateChange(State.STAY_STILL, "Hold still...");
+            if (!this._manualMode) {
+              // Enough consecutive good frames — pick the best from buffer and capture immediately
+              this._candidates = this._frameBuffer.slice();
+              this._selectBestFrame();
+            } else {
+              // Manual mode: enter STAY_STILL and wait for explicit capture() call
+              this._state = State.STAY_STILL;
+              this._stayStillStart = performance.now();
+              this._candidates = [];
+              this._onStateChange(State.STAY_STILL, "Hold still...");
+            }
           }
         } else {
           this._consecutiveGoodFrames = 0;
@@ -1963,6 +1993,7 @@
         }
       }
 
+      // STAY_STILL is only used in manual mode now
       if (this._state === State.STAY_STILL) {
         if (!report.allPassed) {
           this._state = State.DETECTING;
@@ -1970,17 +2001,11 @@
           this._candidates = [];
           this._onStateChange(State.DETECTING, "Position document in frame");
         } else {
-          // Store detection-space corners scaled to full video resolution — the actual
-          // high-quality frame is grabbed fresh from the video in _selectBestFrame.
           this._candidates.push({
             sharpness:   report.checks.sharpness.value,
             fullCorners: fullCorners,
             report:      report,
           });
-
-          if (!this._manualMode && performance.now() - this._stayStillStart >= this._stayStillMs) {
-            this._selectBestFrame();
-          }
         }
       }
 
@@ -3349,11 +3374,13 @@
       if (!c.glare.pass)             failing.push('glare');
       if (!c.documentSize.pass)      failing.push('size');
       if (!c.cornersFound.pass)      failing.push('corners');
+      if (c.confidence && !c.confidence.pass) failing.push('confidence');
       return {
         sharpness:  Math.min(100, Math.round((c.sharpness.value  / 219) * 100)),
         brightness: Math.min(100, Math.round((c.brightness.value / 178) * 100)),
         glare:      Math.min(100, Math.round(c.glare.value * 100)),
         size:       Math.min(100, Math.round(c.documentSize.value * 100)),
+        confidence: Math.min(100, Math.round((c.confidence ? c.confidence.value : 0) * 100)),
         failing:    failing,
       };
     }
@@ -3363,6 +3390,7 @@
       if (!report || !report.checks)          return InstructionCode.SEARCHING;
       var c = report.checks;
       if (!c.cornersFound.pass)        return InstructionCode.SEARCHING;
+      if (c.confidence && !c.confidence.pass) return InstructionCode.SEARCHING;
       if (!c.cornersWithinMargin.pass) return InstructionCode.CENTER_DOCUMENT;
       if (!c.documentSize.pass)        return InstructionCode.MOVE_CLOSER;
       if (!c.sharpness.pass)           return InstructionCode.SHARPEN;
