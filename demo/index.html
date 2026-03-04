@@ -304,30 +304,63 @@
       border-top: 1px solid #2a2a44;
       margin-bottom: 14px;
     }
-    #historyList { display: flex; flex-direction: column; gap: 8px; }
+    #historyList { display: flex; flex-direction: column; gap: 10px; }
     .history-empty {
       color: #555; font-size: 12px;
       text-align: center; padding: 16px 0;
     }
+
+    /*
+     * History card: image fills full width by default (narrow / portrait).
+     * On wider screens (≥ 520 px) the image sits left (~55 %) and the
+     * meta/badges column sits to its right so the card stays compact.
+     */
     .history-item {
-      display: flex; gap: 10px; align-items: flex-start;
       background: #16213e;
-      border-radius: 8px; padding: 8px 10px;
+      border-radius: 10px;
+      overflow: hidden;           /* clips image corners */
+      display: flex;
+      flex-direction: column;     /* image on top, info below on narrow */
     }
-    .history-thumb { width: 72px; flex-shrink: 0; }
-    .history-thumb img {
-      width: 72px; height: auto;
-      display: block; border-radius: 4px;
+
+    @media (min-width: 520px) {
+      .history-item {
+        flex-direction: row;      /* image left, info right on wider screens */
+        align-items: stretch;
+      }
+    }
+
+    /* Image fills full width in column layout */
+    .history-img-wrap {
+      flex-shrink: 0;
       background: #0f0f23;
     }
-    .history-thumb .no-thumb {
-      width: 72px; height: 50px;
-      display: flex; align-items: center; justify-content: center;
-      background: #0f0f23; border-radius: 4px;
-      color: #444; font-size: 10px;
+    .history-img-wrap img {
+      display: block;
+      width: 100%;
+      height: auto;
     }
-    .history-info { flex: 1; min-width: 0; }
-    .history-ts { color: #666; font-size: 10px; margin-bottom: 5px; }
+    .history-img-wrap .no-thumb {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 80px;
+      color: #444; font-size: 11px;
+    }
+
+    /* On wide screens, constrain image column to ~55 % */
+    @media (min-width: 520px) {
+      .history-img-wrap {
+        width: 55%;
+        max-width: 55%;
+      }
+      .history-img-wrap img { height: 100%; object-fit: cover; }
+    }
+
+    /* Info column: timestamp + badges */
+    .history-info {
+      flex: 1; min-width: 0;
+      padding: 8px 10px;
+    }
+    .history-ts { color: #666; font-size: 10px; margin-bottom: 6px; }
     .history-badges { display: flex; flex-wrap: wrap; gap: 4px; }
     .hbadge {
       font-size: 10px; padding: 2px 6px;
@@ -926,8 +959,8 @@ function renderHistory() {
     }
 
     item.innerHTML =
-      '<div class="history-thumb">' +
-        (e.thumbUrl ? '<img src="' + e.thumbUrl + '" alt="capture">' : '<div class="no-thumb">–</div>') +
+      '<div class="history-img-wrap">' +
+        (e.thumbUrl ? '<img src="' + e.thumbUrl + '" alt="capture">' : '<div class="no-thumb">No image</div>') +
       '</div>' +
       '<div class="history-info">' +
         '<div class="history-ts">' + ts + ' · Side ' + (e.sideIndex + 1) + '</div>' +
