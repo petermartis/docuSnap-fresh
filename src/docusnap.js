@@ -716,10 +716,11 @@
             var avgH = (leftH + rightH) / 2;
             if (avgW < 5 || avgH < 5) { _rej.size++; continue; }
 
-            // Opposite sides similar
+            // Opposite sides similar — a flat card under realistic phone-distance
+            // perspective can't foreshorten more than ~30% (ratio 0.70).
             var widthRatio = Math.min(topW, botW) / Math.max(topW, botW);
             var heightRatio = Math.min(leftH, rightH) / Math.max(leftH, rightH);
-            if (widthRatio < 0.6 || heightRatio < 0.6) { _rej.edgeRatio++; continue; }
+            if (widthRatio < 0.70 || heightRatio < 0.70) { _rej.edgeRatio++; continue; }
 
             // Aspect ratio - document must be landscape (wider than tall)
             // and match credit card (1.586) or passport (1.42) aspect ratios
@@ -755,9 +756,16 @@
             var diagRatio = Math.min(diag1, diag2) / Math.max(diag1, diag2);
             if (diagRatio < 0.5) { _rej.diag++; continue; }
             
-            // 3. Corner angle sanity check (very loose - just reject extreme distortion)
-            var minAngle = 45, maxAngle = 135;  // Much more permissive than before
+            // 3. Group corner-angle budget check.
+            // For a perspective projection of a flat rectangle the deviations
+            // from 90° are correlated (they must sum to 0).  Instead of
+            // checking each corner independently against a wide band, we
+            // limit the TOTAL absolute deviation: sum(|angle_i - 90°|).
+            // Real extreme perspective ≈ 80°; impossible grout quads > 100°.
+            var maxTotalDeviation = 80;  // degrees — total budget across all 4 corners
+            var maxSingleAngleDeviation = 30;  // no single corner beyond 60-120°
             var anglesOk = true;
+            var totalDeviation = 0;
             for (var ai = 0; ai < 4; ai++) {
               var prev = sorted[(ai + 3) % 4];
               var curr = sorted[ai];
@@ -770,9 +778,11 @@
               if (m1 < 0.001 || m2 < 0.001) { anglesOk = false; break; }
               var cosA = dot / (m1 * m2);
               var aDeg = Math.acos(Math.max(-1, Math.min(1, cosA))) * 180 / Math.PI;
-              if (aDeg < minAngle || aDeg > maxAngle) { anglesOk = false; break; }
+              var dev = Math.abs(aDeg - 90);
+              if (dev > maxSingleAngleDeviation) { anglesOk = false; break; }
+              totalDeviation += dev;
             }
-            if (!anglesOk) { _rej.angles++; continue; }
+            if (!anglesOk || totalDeviation > maxTotalDeviation) { _rej.angles++; continue; }
 
             // --- ROTATION CHECK ---
             // Document must be roughly horizontal (within +/- 30 degrees)
@@ -1298,88 +1308,34 @@
      * @private
      */
     _computeHomography(srcPts, dstPts) {
-      // Build 8x9 matrix A for homogeneous system Ah = 0
-      var A = [];
+      // For exactly 4 point correspondences, set h9=1 and solve the
+      // resulting 8×8 linear system directly.  This is far more robust
+      // than the previous inverse-iteration eigenvector approach which
+      // required regularisation hacks and often returned near-identity
+      // matrices for cards with little perspective distortion.
+      //
+      // Homography: dx = (h1·sx + h2·sy + h3) / (h7·sx + h8·sy + 1)
+      //             dy = (h4·sx + h5·sy + h6) / (h7·sx + h8·sy + 1)
+      // Rearranged: h1·sx + h2·sy + h3 - dx·h7·sx - dx·h8·sy = dx
+      //             h4·sx + h5·sy + h6 - dy·h7·sx - dy·h8·sy = dy
+
+      var A = [];  // 8×8
+      var b = [];  // 8×1
       for (var i = 0; i < 4; i++) {
         var sx = srcPts[i][0], sy = srcPts[i][1];
         var dx = dstPts[i][0], dy = dstPts[i][1];
-        A.push([-sx, -sy, -1, 0, 0, 0, sx * dx, sy * dx, dx]);
-        A.push([0, 0, 0, -sx, -sy, -1, sx * dy, sy * dy, dy]);
+        A.push([sx, sy, 1, 0, 0, 0, -dx * sx, -dx * sy]);
+        b.push(dx);
+        A.push([0, 0, 0, sx, sy, 1, -dy * sx, -dy * sy]);
+        b.push(dy);
       }
 
-      // Solve using SVD (simplified for 4-point case)
-      // We use a direct solve since we have exactly 8 equations for 8 unknowns (h9=1)
-      var At = this._transpose(A);
-      var AtA = this._matMul(At, A);
-      
-      // Solve AtA * h = 0 by finding eigenvector of smallest eigenvalue
-      // For simplicity, use power iteration on inverse
-      var h = this._solveHomogeneous(AtA);
-      if (!h) return null;
+      var h8 = this._gaussSolve(A, b);
+      if (!h8) return null;
 
-      return h;
-    }
-
-    /** @private - Transpose matrix */
-    _transpose(M) {
-      var rows = M.length, cols = M[0].length;
-      var T = [];
-      for (var j = 0; j < cols; j++) {
-        T[j] = [];
-        for (var i = 0; i < rows; i++) {
-          T[j][i] = M[i][j];
-        }
-      }
-      return T;
-    }
-
-    /** @private - Matrix multiply */
-    _matMul(A, B) {
-      var rowsA = A.length, colsA = A[0].length;
-      var colsB = B[0].length;
-      var C = [];
-      for (var i = 0; i < rowsA; i++) {
-        C[i] = [];
-        for (var j = 0; j < colsB; j++) {
-          var sum = 0;
-          for (var k = 0; k < colsA; k++) {
-            sum += A[i][k] * B[k][j];
-          }
-          C[i][j] = sum;
-        }
-      }
-      return C;
-    }
-
-    /** @private - Solve Ah=0 using inverse iteration */
-    _solveHomogeneous(AtA) {
-      var n = AtA.length;
-      // Add small regularization and solve (AtA + εI)x = b
-      // Use power iteration to find smallest eigenvector
-      var h = [];
-      for (var i = 0; i < n; i++) h[i] = 1;
-
-      // Inverse iteration (find eigenvector of smallest eigenvalue)
-      for (var iter = 0; iter < 100; iter++) {
-        // Solve AtA * h_new = h using Gaussian elimination
-        var h_new = this._gaussSolve(AtA, h);
-        if (!h_new) return null;
-
-        // Normalize
-        var norm = 0;
-        for (var i = 0; i < n; i++) norm += h_new[i] * h_new[i];
-        norm = Math.sqrt(norm);
-        if (norm < 1e-10) return null;
-        for (var i = 0; i < n; i++) h_new[i] /= norm;
-
-        h = h_new;
-      }
-
-      // Normalize so h[8] = 1
-      if (Math.abs(h[8]) < 1e-10) return null;
-      for (var i = 0; i < 9; i++) h[i] /= h[8];
-
-      return h;
+      // h8 contains [h1..h8]; append h9=1
+      h8.push(1);
+      return h8;
     }
 
     /** @private - Gaussian elimination solver */
@@ -1403,9 +1359,8 @@
         }
         var tmp = M[col]; M[col] = M[maxRow]; M[maxRow] = tmp;
 
-        if (Math.abs(M[col][col]) < 1e-10) {
-          // Add regularization
-          M[col][col] += 1e-6;
+        if (Math.abs(M[col][col]) < 1e-12) {
+          return null;  // Singular matrix — no valid homography
         }
 
         // Eliminate

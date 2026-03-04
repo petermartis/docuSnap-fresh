@@ -737,6 +737,7 @@
         </label>
         <label style="grid-column:1/-1">Liveness Proxy URL
           <input type="text" id="cfgLivenessProxy"
+                 value="https://docusnap-liveness.peter-martis.workers.dev"
                  placeholder="http://localhost:3001  (run: npm run proxy)"
                  style="width:100%;margin-top:4px;background:#0d0d1a;border:1px solid #333;
                         border-radius:6px;color:#fff;padding:5px 8px;font-size:12px;">
@@ -1551,23 +1552,45 @@ async function sendToOCR() {
     var back      = capturedSides.find(function (cr) { return cr.sideIndex === 1; });
     var frontBlob = front ? (front.documentImage || front.image) : null;
     var backBlob  = back  ? (back.documentImage  || back.image)  : null;
+    var isCropped = !!(front && front.documentImage);
     if (!frontBlob) throw new Error('No front image available');
 
+    console.log('[OCR] sending image:', {
+      isCropped: isCropped,
+      blobType: frontBlob.type,
+      blobSize: frontBlob.size,
+      hasDocumentImage: !!(front && front.documentImage),
+    });
+
+    // Use combined recognizer when both sides are available, single-side otherwise.
+    // The combined endpoint returns STAGE_VALID (incomplete) with empty fields
+    // when only the front is provided — it waits for the back side.
+    var useCombined = !!backBlob;
+    var endpoint = useCombined
+      ? 'https://api.microblink.com/v1/recognizers/blinkid-combined'
+      : 'https://api.microblink.com/v1/recognizers/blinkid';
+
+    var frontB64 = await blobToBase64(frontBlob);
     var body = {
       returnFullDocumentImage:  false,
       returnFaceImage:          false,
       returnSignatureImage:     false,
-      // Tell Microblink the image is already a perspective-corrected crop,
-      // not a raw camera frame — otherwise it searches for a document within
-      // the image and fails to find one (returns COUNTRY_NONE / TYPE_NONE).
-      scanCroppedDocumentImage: true,
-      imageFrontSide: await blobToBase64(frontBlob),
+      // Our crop includes a 25% margin around the document, so Microblink
+      // still needs to locate the document within the image. Setting this to
+      // false lets it search; true would assume the entire image IS the doc.
+      scanCroppedDocumentImage: false,
     };
-    if (backBlob) {
-      body.imageBackSide = await blobToBase64(backBlob);
+
+    if (useCombined) {
+      body.imageFrontSide = frontB64;
+      body.imageBackSide  = await blobToBase64(backBlob);
+    } else {
+      body.imageSource = frontB64;
     }
 
-    var resp = await fetch('https://api.microblink.com/v1/recognizers/blinkid-combined', {
+    console.log('[OCR] endpoint:', endpoint, 'combined:', useCombined);
+
+    var resp = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
