@@ -3050,9 +3050,23 @@
 
       // Face detection (throttled, scoped to document crop on the 640px det canvas)
       var faceResult = null;
-      if (this._faceDetector && raw.detCanvas && raw.detCorners) {
-        var cropBox = this._cornersToCropBox(raw.detCorners, raw.detCanvas.width, raw.detCanvas.height);
-        faceResult = await this._faceDetector.detect(raw.detCanvas, cropBox);
+      if (this._faceDetector) {
+        if (raw.detCanvas && raw.detCorners) {
+          var cropBox = this._cornersToCropBox(raw.detCorners, raw.detCanvas.width, raw.detCanvas.height);
+          faceResult = await this._faceDetector.detect(raw.detCanvas, cropBox);
+        } else {
+          // Detector is active but document not yet located — emit a neutral result
+          // so the UI can still show the Face Present row in the quality panel.
+          faceResult = { present: null, confidence: null, bounds: null };
+        }
+      }
+
+      // Gate auto-capture: if face presence is required and face is not yet confirmed,
+      // keep resetting the stay-still countdown so capture never fires without a face.
+      if (this.face && this.face.requirePresent &&
+          raw.state === State.STAY_STILL && this._autoCapture &&
+          (!faceResult || !faceResult.present)) {
+        this._autoCapture._stayStillStart = performance.now();
       }
 
       this._onFrame({
@@ -3075,6 +3089,13 @@
       this._buildCaptureResult(rawResult, 'auto').then(function (cr) {
         self._capturedSides.push(cr);
         self._onCapture(cr);
+        // Auto-resume the detection loop after 2 s so the preview doesn't freeze
+        setTimeout(function () {
+          if (self._autoCapture && self._scanState === 'captured') {
+            self._autoCapture.reset();
+            self._scanState = 'ready';
+          }
+        }, 2000);
       }).catch(function (err) {
         self._onError({ code: 'CAPTURE_ERROR', message: err.message, cause: err });
       });
@@ -3129,11 +3150,11 @@
     _buildThresholds(sideConf) {
       var q = Object.assign({}, this.quality, (sideConf && sideConf.quality) || {});
       return {
-        sharpnessMin:    ((q.sharpness  != null ? q.sharpness  : 50) / 100) * 219,
+        sharpnessMin:    ((q.sharpness  != null ? q.sharpness  : 40) / 100) * 219,
         brightnessMin:   ((q.brightness != null ? q.brightness : 40) / 100) * 178,
         glareMax:        (q.glare          != null ? q.glare          : 10)  / 100,
-        glareThreshold:   q.glareThreshold != null ? q.glareThreshold : 200,
-        documentSizeMin: (q.size  != null ? q.size  : 30) / 100,
+        glareThreshold:   q.glareThreshold != null ? q.glareThreshold : 220,
+        documentSizeMin: (q.size  != null ? q.size  : 40) / 100,
         cornerMarginPx:  10,
       };
     }

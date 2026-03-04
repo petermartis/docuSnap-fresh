@@ -47,19 +47,15 @@
       .video-container {
         flex: none;
         width: 100%;
-        max-height: 50vh;
+        max-height: 55vh;
         overflow: hidden;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        /* no flex centering — canvas fills full width, container clips excess height */
       }
 
       #canvas {
-        width: auto;
-        height: auto;
-        max-width: 100%;
-        max-height: 50vh;
         display: block;
+        width: 100%;   /* always fill container width */
+        height: auto;  /* proportional height; container clips if taller than 55vh */
       }
 
       .result-container {
@@ -462,7 +458,7 @@
           <!-- Quality / state panel -->
           <div class="status">
             <div class="status-item">
-              <div class="status-label">State</div>
+              <div class="status-label">Real-time quality assessment</div>
               <div class="status-value" id="score">–</div>
             </div>
 
@@ -492,7 +488,7 @@
               </div>
               <!-- Face row — revealed dynamically when face detection is active -->
               <div class="indicator" id="faceIndicatorRow">
-                <span class="ind-label">Face</span>
+                <span class="ind-label">Face Present</span>
                 <span class="ind-value"  id="indFace">–</span>
                 <span class="ind-status" id="indFaceStatus">⚪</span>
               </div>
@@ -534,7 +530,7 @@
                   </select>
                 </label>
                 <label>Sharpness Min (0-100)
-                  <input type="number" id="cfgSharpness"   value="50" min="0" max="100">
+                  <input type="number" id="cfgSharpness"   value="40" min="0" max="100">
                 </label>
                 <label>Brightness Min (0-100)
                   <input type="number" id="cfgBrightness"  value="40" min="0" max="100">
@@ -543,7 +539,7 @@
                   <input type="number" id="cfgGlare"            value="10"  min="0" max="100">
                 </label>
                 <label>Doc Size Min (0-100)
-                  <input type="number" id="cfgDocSize"     value="30" min="0" max="100">
+                  <input type="number" id="cfgDocSize"     value="40" min="0" max="100">
                 </label>
               </div>
               <button id="applyConfigBtn" class="config-btn">Apply &amp; Restart</button>
@@ -617,10 +613,10 @@
 
     const nv = (id, def) => { var v = parseFloat(document.getElementById(id).value); return isNaN(v) ? def : v; };
     const q = {
-      sharpness:      nv('cfgSharpness',      50),
+      sharpness:      nv('cfgSharpness',      40),
       brightness:     nv('cfgBrightness',     40),
       glare:          nv('cfgGlare',          10),
-      size:           nv('cfgDocSize',        30),
+      size:           nv('cfgDocSize',        40),
     };
 
     const faceConfig = faceOpt === 'off'
@@ -693,10 +689,11 @@
         showCameraMode();
         await snap.start(video, canvas);
 
-        startBtn.disabled   = true;
-        stopBtn.disabled    = false;
-        captureBtn.disabled = (cfg.mode !== 'manual');
-        banner.style.display = '';
+        startBtn.disabled        = true;
+        stopBtn.disabled         = false;
+        captureBtn.style.display = cfg.mode === 'manual' ? '' : 'none';
+        captureBtn.disabled      = false;
+        banner.style.display     = '';
       } catch (err) {
         console.warn('Camera unavailable (' + err.name + ') — switching to file mode');
         if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
@@ -748,7 +745,9 @@
       scoreEl.textContent = frame.instructionCode === IC.HOLD_STILL ? '✅ Hold still…' : '✅ Ready';
       scoreEl.style.color = '#2ed573';
     } else {
-      scoreEl.textContent = frame.instructionCode.replace(/_/g, ' ');
+      const IC_LABELS = { SHARPEN: 'TOO BLURRY' };
+      const rawLabel = frame.instructionCode.replace(/_/g, ' ');
+      scoreEl.textContent = IC_LABELS[frame.instructionCode] || rawLabel;
       scoreEl.style.color = '#ff4757';
     }
 
@@ -767,23 +766,24 @@
 
     // Face detection
     if (frame.face !== null && frame.face !== undefined) {
+      const requireFace = document.getElementById('cfgFace').value === 'require';
       faceRow.style.display   = '';
       faceBadge.style.display = '';
       if (frame.face.present === null) {
-        indFace.textContent    = '–';
+        indFace.textContent       = '–';
         indFaceStatus.textContent = '⚪';
-        faceBadge.textContent  = '👤 –';
-        faceBadge.className    = 'unknown';
+        faceBadge.textContent     = '👤 –';
+        faceBadge.className       = 'unknown';
       } else if (frame.face.present) {
-        indFace.textContent    = (frame.face.confidence * 100).toFixed(0) + '%';
-        indFaceStatus.textContent = '✅';
-        faceBadge.textContent  = '👤 ✓';
-        faceBadge.className    = 'present';
+        indFace.textContent       = 'Yes';
+        indFaceStatus.textContent = requireFace ? '✅' : '⚪';
+        faceBadge.textContent     = '👤 ✓';
+        faceBadge.className       = 'present';
       } else {
-        indFace.textContent    = 'No';
-        indFaceStatus.textContent = '❌';
-        faceBadge.textContent  = '👤 ✗';
-        faceBadge.className    = 'absent';
+        indFace.textContent       = 'No';
+        indFaceStatus.textContent = requireFace ? '❌' : '⚪';
+        faceBadge.textContent     = '👤 ✗';
+        faceBadge.className       = 'absent';
       }
     }
   }
@@ -803,12 +803,18 @@
     capturedImages.full = cr.image         ? URL.createObjectURL(cr.image)         : null;
     capturedImages.doc  = cr.documentImage ? URL.createObjectURL(cr.documentImage) : null;
 
-    showResultImage(capturedImages.full);
-
-    // Toggle tab visibility
-    capturedTabs.style.display = capturedImages.doc ? '' : 'none';
-    tabFull.classList.toggle('active', true);
-    tabDoc.classList.toggle('active', false);
+    // Show de-skewed document by default; fall back to full frame if unavailable
+    if (capturedImages.doc) {
+      showResultImage(capturedImages.doc);
+      capturedTabs.style.display = '';
+      tabDoc.classList.toggle('active', true);
+      tabFull.classList.toggle('active', false);
+    } else {
+      showResultImage(capturedImages.full);
+      capturedTabs.style.display = 'none';
+      tabFull.classList.toggle('active', true);
+      tabDoc.classList.toggle('active', false);
+    }
 
     // Flash effect
     result.style.boxShadow = '0 0 30px #2ed573';
@@ -820,11 +826,11 @@
 
     // Face result in capture
     if (cr.face && cr.face.present !== null) {
-      indFace.textContent    = cr.face.present
-        ? (cr.face.confidence * 100).toFixed(0) + '%' : 'No';
-      indFaceStatus.textContent = cr.face.present ? '✅' : '❌';
-      faceBadge.textContent  = cr.face.present ? '👤 ✓' : '👤 ✗';
-      faceBadge.className    = cr.face.present ? 'present' : 'absent';
+      const requireFace = document.getElementById('cfgFace').value === 'require';
+      indFace.textContent       = cr.face.present ? 'Yes' : 'No';
+      indFaceStatus.textContent = requireFace ? (cr.face.present ? '✅' : '❌') : '⚪';
+      faceBadge.textContent     = cr.face.present ? '👤 ✓' : '👤 ✗';
+      faceBadge.className       = cr.face.present ? 'present' : 'absent';
     }
 
     // Multi-side: show "Scan Other Side" button
