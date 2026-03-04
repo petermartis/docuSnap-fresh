@@ -167,11 +167,8 @@
       opacity: 0.3;
       pointer-events: none;
     }
-    .qp-score.searching {
-      color: #666 !important;
-      font-size: 13px;
-      font-style: italic;
-    }
+    /* .qp-score.searching is no longer used — "LOOKING FOR DOCUMENT" uses the same
+       red bold-caps style as other prompt codes. Kept here as a no-op remnant. */
 
     /* ─────────────────── Hint box ─────────────────── */
     #hintBox {
@@ -767,8 +764,9 @@ function handleFrame(frame) {
 
   // Score / state line
   if (searching) {
-    scoreEl.textContent = '🔍 Looking for document…';
-    scoreEl.className   = 'qp-score searching';
+    scoreEl.textContent = 'LOOKING FOR DOCUMENT';
+    scoreEl.className   = 'qp-score';
+    scoreEl.style.color = '#ff4757';
   } else if (frame.instructionCode === IC.CONFIRMED || frame.instructionCode === IC.HOLD_STILL) {
     scoreEl.textContent = frame.instructionCode === IC.HOLD_STILL ? '✅ Hold still…' : '✅ Ready';
     scoreEl.className   = 'qp-score';
@@ -889,26 +887,34 @@ function renderCapturedQuality(q, face) {
   capturedQualityEl.innerHTML = '';
   if (!q) { capturedQualityEl.style.display = 'none'; return; }
 
-  // 4 metrics in 2-column grid, face spans both columns
   const metrics = [
-    { label: 'Sharpness',  value: q.sharpness,  pass: !q.failing.includes('sharpness'),  suffix: '%', full: false },
-    { label: 'Brightness', value: q.brightness, pass: !q.failing.includes('brightness'), suffix: '%', full: false },
-    { label: 'Glare',      value: q.glare,       pass: !q.failing.includes('glare'),      suffix: '%', full: false },
-    { label: 'Doc Size',   value: q.size,        pass: !q.failing.includes('size'),       suffix: '%', full: false },
+    { label: 'Sharpness',  value: q.sharpness,  pass: !q.failing.includes('sharpness'),  suffix: '%' },
+    { label: 'Brightness', value: q.brightness, pass: !q.failing.includes('brightness'), suffix: '%' },
+    { label: 'Glare',      value: q.glare,       pass: !q.failing.includes('glare'),      suffix: '%' },
+    { label: 'Doc Size',   value: q.size,        pass: !q.failing.includes('size'),       suffix: '%' },
   ];
-  if (face && face.present !== null) {
-    metrics.push({ label: 'Face Present', value: face.present ? 'Yes' : 'No', pass: face.present === true, suffix: '', full: true });
+  // Show Face Present whenever face detection was active (face object exists),
+  // even if the result is still pending (present === null → show "–" with ⚪).
+  if (face) {
+    const p = face.present;
+    metrics.push({
+      label: 'Face Present',
+      value: p === null ? '–' : (p ? 'Yes' : 'No'),
+      icon:  p === null ? '⚪' : (p ? '✅' : '❌'),
+      suffix: '',
+    });
   }
 
   capturedQualityEl.style.display = 'grid';
   metrics.forEach(function (m) {
     const row = document.createElement('div');
-    row.className = 'cap-ind' + (m.full ? ' cap-face' : '');
-    const val = typeof m.value === 'number' ? m.value.toFixed(0) + m.suffix : m.value;
+    row.className = 'cap-ind';
+    const val    = typeof m.value === 'number' ? m.value.toFixed(0) + m.suffix : m.value;
+    const status = m.icon != null ? m.icon : (m.pass ? '✅' : '❌');
     row.innerHTML =
-      '<span class="ind-label">'  + m.label + '</span>' +
-      '<span class="ind-value">'  + val     + '</span>' +
-      '<span class="ind-status">' + (m.pass ? '✅' : '❌') + '</span>';
+      '<span class="ind-label">'  + m.label  + '</span>' +
+      '<span class="ind-value">'  + val      + '</span>' +
+      '<span class="ind-status">' + status   + '</span>';
     capturedQualityEl.appendChild(row);
   });
 }
@@ -947,8 +953,15 @@ function renderHistory() {
         badge('Glare: '  + q.glare.toFixed(0)      + '%', !q.failing.includes('glare'))      +
         badge('Size: '   + q.size.toFixed(0)        + '%', !q.failing.includes('size'));
     }
-    if (e.face && e.face.present !== null) {
-      badges += badge('Face: ' + (e.face.present ? 'Yes' : 'No'), e.face.present);
+    // Show face badge whenever face detection was active (face object present),
+    // using neutral style when result is still pending (present === null).
+    if (e.face) {
+      const p = e.face.present;
+      if (p === null) {
+        badges += '<span class="hbadge neutral">Face: –</span>';
+      } else {
+        badges += badge('Face: ' + (p ? 'Yes' : 'No'), p);
+      }
     }
 
     item.innerHTML =

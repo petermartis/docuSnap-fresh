@@ -3064,7 +3064,7 @@
 
       // Gate auto-capture: if face presence is required and face is not yet confirmed,
       // keep resetting the stay-still countdown so capture never fires without a face.
-      if (this.face && this.face.requirePresent &&
+      if (this.faceConfig && this.faceConfig.requirePresent &&
           raw.state === State.STAY_STILL && this._autoCapture &&
           (!faceResult || !faceResult.present)) {
         this._autoCapture._stayStillStart = performance.now();
@@ -3129,7 +3129,9 @@
         ? this._normalizeQuality(rawResult.qualityReport)
         : { sharpness: 0, brightness: 0, glare: 0, size: 0, failing: [] };
 
-      var faceResult = this._faceDetector ? this._faceDetector._lastResult : null;
+      var faceResult = this._faceDetector
+        ? (this._faceDetector._lastResult || { present: null, confidence: null, bounds: null })
+        : null;
 
       return {
         image:         imageBlob,
