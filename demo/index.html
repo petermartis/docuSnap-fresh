@@ -1374,7 +1374,10 @@ function renderHistory() {
     if (e.ocrResult) {
       var _ocrTop = (e.ocrResult.data && typeof e.ocrResult.data === 'object') ? e.ocrResult.data : e.ocrResult;
       var r2 = _ocrTop.result || _ocrTop.recognizerResults || _ocrTop;
-      function sv2(f) { return f && f.value ? f.value : (typeof f === 'string' ? f : ''); }
+      function sv2(f) {
+        var v = f && f.value ? f.value : (typeof f === 'string' ? f : '');
+        return (v && !v.endsWith('_NONE')) ? v : '';
+      }
       ocrName = [sv2(r2.firstName), sv2(r2.lastName)].filter(Boolean).join(' ');
       var docNo2 = sv2(r2.documentNumber);
       if (ocrName || docNo2) {
@@ -1537,9 +1540,13 @@ async function sendToOCR() {
     if (!frontBlob) throw new Error('No front image available');
 
     var body = {
-      returnFullDocumentImage: false,
-      returnFaceImage:         false,
-      returnSignatureImage:    false,
+      returnFullDocumentImage:  false,
+      returnFaceImage:          false,
+      returnSignatureImage:     false,
+      // Tell Microblink the image is already a perspective-corrected crop,
+      // not a raw camera frame — otherwise it searches for a document within
+      // the image and fails to find one (returns COUNTRY_NONE / TYPE_NONE).
+      scanCroppedDocumentImage: true,
       imageFrontSide: await blobToBase64(frontBlob),
     };
     if (backBlob) {
@@ -1630,7 +1637,17 @@ function renderOcrDetails(data) {
   // Handle both flat { result: {...} } and nested { data: { result: {...} } } shapes.
   var top = (data.data && typeof data.data === 'object') ? data.data : data;
   var r = top.result || top.recognizerResults || top;
-  function sv(f) { return f && f.value ? String(f.value) : (typeof f === 'string' ? f : null); }
+
+  // recognitionStatus lives at the top level (outside result in some API versions)
+  var status = top.recognitionStatus || r.recognitionStatus || '';
+  var statusOk = status === 'VALID_RECOGNIZED' || status === 'SUCCESSFUL' || status === 'OK';
+
+  function sv(f) {
+    var v = f && f.value ? String(f.value) : (typeof f === 'string' ? f : null);
+    // Microblink returns "_NONE" sentinels (e.g. COUNTRY_NONE) for unrecognised fields — hide them.
+    if (v && v.endsWith('_NONE')) return null;
+    return v && v.trim() ? v : null;
+  }
 
   var pairs = [
     ['First Name',    sv(r.firstName)],
@@ -1641,11 +1658,20 @@ function renderOcrDetails(data) {
     ['Nationality',   sv(r.nationality)],
     ['Document No',   sv(r.documentNumber)],
     ['Expiry',        sv(r.dateOfExpiry)],
-    ['Country',       sv(r.classInfo && r.classInfo.country)],
-    ['Doc Type',      sv(r.classInfo && r.classInfo.type)],
+    // classInfo holds country/type; fall back to top-level strings for older API shapes
+    ['Country',       sv(r.classInfo && r.classInfo.country) || sv(r.country)],
+    ['Doc Type',      sv(r.classInfo && r.classInfo.type)    || sv(r.documentType)],
     ['Address',       sv(r.address)],
     ['MRZ',           sv(r.mrz && r.mrz.mrzText)],
   ].filter(function (p) { return p[1]; });
+
+  // Build status header
+  var statusHtml = '';
+  if (status) {
+    var sColor = statusOk ? '#2ed573' : '#ff4757';
+    statusHtml = '<span style="font-size:10px;color:' + sColor + ';margin-left:8px;">' +
+                 status + '</span>';
+  }
 
   var inner = '';
   if (pairs.length) {
@@ -1654,6 +1680,9 @@ function renderOcrDetails(data) {
                '<span class="ocr-val">' + p[1] + '</span>';
     });
     inner = '<div class="ocr-fields">' + inner + '</div>';
+  } else if (status && !statusOk) {
+    inner = '<div style="color:#ff4757;font-size:11px;padding:6px 0;">Recognition failed — ' +
+            'the document was not identified. Check image quality and try again.</div>';
   } else {
     // Fallback: dump raw JSON if we can't parse known fields
     inner = '<pre style="color:#aaa;font-size:10px;white-space:pre-wrap;overflow:auto;max-height:200px;">' +
@@ -1661,7 +1690,7 @@ function renderOcrDetails(data) {
   }
 
   ocrDetailsEl.style.display = 'block';
-  ocrDetailsEl.innerHTML = '<div class="ocr-hdr">📋 OCR Result</div>' + inner;
+  ocrDetailsEl.innerHTML = '<div class="ocr-hdr">📋 OCR Result' + statusHtml + '</div>' + inner;
 }
 
 // ── Button handlers ────────────────────────────────────────────────────────
