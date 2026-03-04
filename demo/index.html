@@ -512,7 +512,6 @@
         let currentThresholds = {
           sharpnessMin: (50 / 100) * 219,    // UI 50 -> raw ~110
           brightnessMin: (50 / 100) * 178,   // UI 50 -> raw ~89
-          brightnessMax: 255,                 // No max limit
           glareMax: 0.10,                     // Fail if glare score > 10 (out of 100)
           glareThreshold: 248,               // Pixel brightness threshold for glare (248 = near-white only)
           documentSizeMin: 0.15,              // Lowered from 0.30 for easier detection
@@ -622,7 +621,6 @@
           currentThresholds = {
             sharpnessMin: (sharpnessNorm / 100) * 219,        // 0-100 -> 0-219 raw
             brightnessMin: (brightnessMinNorm / 100) * 178,   // 0-100 -> 0-178 raw
-            brightnessMax: 255,                                // No max limit
             glareMax: (parseFloat(cfgGlare.value) || 10) / 100,
             glareThreshold: parseFloat(cfgGlareThreshold.value) || 248,
             documentSizeMin: (parseFloat(cfgDocSize.value) || 30) / 100,

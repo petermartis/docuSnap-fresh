@@ -1536,7 +1536,6 @@
       thresholds = thresholds || {};
       var sharpnessMin = thresholds.sharpnessMin !== undefined ? thresholds.sharpnessMin : 100;
       var brightnessMin = thresholds.brightnessMin !== undefined ? thresholds.brightnessMin : 40;
-      var brightnessMax = thresholds.brightnessMax !== undefined ? thresholds.brightnessMax : 220;
       var glareMax = thresholds.glareMax !== undefined ? thresholds.glareMax : 0.10;
       // Pixel brightness threshold for glare detection (0-255).
       // 248 = only catch near-white hotspots; white card background (~230-247) is not flagged.
@@ -1562,7 +1561,7 @@
 
       var checks = {
         sharpness: { value: sharpness, pass: sharpness >= sharpnessMin },
-        brightness: { value: brightness, pass: brightness >= brightnessMin && brightness <= brightnessMax, min: brightnessMin, max: brightnessMax },
+        brightness: { value: brightness, pass: brightness >= brightnessMin, min: brightnessMin },
         glare: { value: glare, pass: glare <= glareMax },
         cornersFound: { value: completeness.allCornersFound, pass: completeness.allCornersFound },
         cornersWithinMargin: { value: completeness.allWithinMargin, pass: completeness.allWithinMargin },
@@ -1872,11 +1871,7 @@
       } else if (!checks.glare.pass) {
         instruction = "Reduce glare - tilt document slightly";
       } else if (!checks.brightness.pass) {
-        if (checks.brightness.value < checks.brightness.min) {
-          instruction = "Too dark - improve lighting";
-        } else {
-          instruction = "Too bright - reduce lighting";
-        }
+        instruction = "Too dark - improve lighting";
       }
 
       this._onStateChange(State.DETECTING, instruction);
@@ -2282,7 +2277,7 @@
         if (!checks.sharpness.pass) issues.push("image is blurry");
         if (!checks.glare.pass) issues.push("glare detected");
         if (!checks.brightness.pass) {
-          issues.push(checks.brightness.value < checks.brightness.min ? "too dark" : "too bright");
+          issues.push("too dark");
         }
         this._statusEl.textContent = "Quality issues: " + issues.join(", ") + ". Please retake.";
 
