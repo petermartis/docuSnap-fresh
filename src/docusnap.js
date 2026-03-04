@@ -2641,51 +2641,59 @@
 
   /** Try each detection backend in order. Returns true when one is ready. */
   _FaceDetector.prototype.init = async function () {
-    // 1. Shape Detection API
+    // 1. Shape Detection API (Chrome/Edge — may be behind a flag)
     if (typeof window !== 'undefined' && window.FaceDetector) {
       try {
         var fd = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
         this._nativeDetector = fd;
         this._method = 'native';
+        console.log('[DocuSnap] Face detection: Shape Detection API (native)');
         return true;
-      } catch (e) { /* Feature-Policy disabled or not supported */ }
+      } catch (e) {
+        console.log('[DocuSnap] Shape Detection API unavailable:', e.message);
+      }
     }
     // 2. pico.js from CDN
     try {
       await this._loadPico();
       this._method = 'pico';
+      console.log('[DocuSnap] Face detection: pico.js loaded');
       return true;
     } catch (e) {
-      console.warn('[DocuSnap] face detection unavailable (pico.js CDN load failed):', e.message);
+      console.warn('[DocuSnap] pico.js failed to load:', e.message);
     }
     this._method = null;
+    console.warn('[DocuSnap] No face detection backend available — face results will always be null');
     return false;
   };
 
   _FaceDetector.prototype._loadPico = function () {
     var self = this;
     return new Promise(function (resolve, reject) {
-      var timer = setTimeout(function () { reject(new Error('timeout')); }, 10000);
+      var timer = setTimeout(function () { reject(new Error('timeout')); }, 12000);
 
       function fail(msg) { clearTimeout(timer); reject(new Error(msg)); }
 
-      // Step 1: runtime script
+      // Step 1: pico.js runtime from npm on jsDelivr (stable, versioned URL)
       var script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/gh/nenadmarkus/picojs@c2a16ac/pico.js';
-      script.onerror = function () { fail('pico.js script failed'); };
+      script.src = 'https://cdn.jsdelivr.net/npm/picojs/pico.js';
+      script.onerror = function () { fail('pico.js script load failed'); };
       script.onload = function () {
-        if (typeof pico === 'undefined') { return fail('pico not defined'); }
-        // Step 2: face cascade (binary file)
+        if (typeof pico === 'undefined' || typeof pico.unpack_cascade !== 'function') {
+          return fail('pico global not found after script load');
+        }
+        // Step 2: facefinder cascade — lives in nenadmarkus/pico (C repo), not picojs
         var xhr = new XMLHttpRequest();
-        xhr.open('GET', 'https://cdn.jsdelivr.net/gh/nenadmarkus/picojs@c2a16ac/examples/facefinder', true);
+        xhr.open('GET', 'https://cdn.jsdelivr.net/gh/nenadmarkus/pico@c2e81f9d23cc11d1a612fd21e4f9de0921a5d0d9/rnt/cascades/facefinder', true);
         xhr.responseType = 'arraybuffer';
         xhr.onerror = function () { fail('cascade fetch failed'); };
         xhr.onload  = function () {
           try {
-            self._picoCascade = pico.unpack_cascade(new Uint8Array(xhr.response));
+            // pico.unpack_cascade requires Int8Array (signed bytes)
+            self._picoCascade = pico.unpack_cascade(new Int8Array(xhr.response));
             clearTimeout(timer);
             resolve();
-          } catch (e) { fail(e.message); }
+          } catch (e) { fail('cascade parse error: ' + e.message); }
         };
         xhr.send();
       };
@@ -2719,23 +2727,10 @@
   };
 
   _FaceDetector.prototype._detectNative = async function (canvas, cropBox) {
-    var src = canvas;
-    var offsetX = 0, offsetY = 0;
-    // Crop to document region to reduce false positives from background
-    if (cropBox && cropBox.width > 4 && cropBox.height > 4) {
-      var cc = document.createElement('canvas');
-      cc.width  = Math.round(cropBox.width);
-      cc.height = Math.round(cropBox.height);
-      cc.getContext('2d').drawImage(
-        canvas,
-        cropBox.x, cropBox.y, cropBox.width, cropBox.height,
-        0, 0, cc.width, cc.height
-      );
-      src = cc;
-      offsetX = cropBox.x;
-      offsetY = cropBox.y;
-    }
-    var faces = await this._nativeDetector.detect(src);
+    // Run on the full canvas — this reliably detects the user's live face in the
+    // camera frame. Cropping to the document region was overly restrictive and
+    // caused native detection to miss faces that weren't within the corner box.
+    var faces = await this._nativeDetector.detect(canvas);
     if (!faces || faces.length === 0) {
       return { present: false, confidence: 0, bounds: null };
     }
@@ -2743,38 +2738,59 @@
     return {
       present:    true,
       confidence: 1.0,
-      bounds: { x: bb.x + offsetX, y: bb.y + offsetY, width: bb.width, height: bb.height },
+      bounds: { x: bb.x, y: bb.y, width: bb.width, height: bb.height },
     };
   };
 
   _FaceDetector.prototype._detectPico = function (canvas, cropBox) {
     if (!this._picoCascade) return null;
-    // pico.js expects a greyscale image + the run_cascade function
-    var ctx = canvas.getContext('2d');
-    var cw = canvas.width, ch = canvas.height;
+
+    // When a document cropBox is available, extract that sub-image so pico searches
+    // only the document region (finds the face photo on the card) and returns
+    // coordinates relative to the full canvas.
+    // Without a cropBox (SEARCHING state), scan the whole frame to catch the user's
+    // live face in the background.
+    var src = canvas;
+    var offsetX = 0, offsetY = 0;
+    if (cropBox && cropBox.width > 40 && cropBox.height > 40) {
+      var cc = document.createElement('canvas');
+      cc.width  = Math.round(cropBox.width);
+      cc.height = Math.round(cropBox.height);
+      cc.getContext('2d').drawImage(
+        canvas, cropBox.x, cropBox.y, cropBox.width, cropBox.height,
+        0, 0, cc.width, cc.height
+      );
+      src     = cc;
+      offsetX = cropBox.x;
+      offsetY = cropBox.y;
+    }
+
+    // Convert to greyscale (pico requirement)
+    var ctx      = src.getContext('2d');
+    var cw       = src.width, ch = src.height;
     var rgbaData = ctx.getImageData(0, 0, cw, ch).data;
-    var gray = new Uint8Array(cw * ch);
+    var gray     = new Uint8Array(cw * ch);
     for (var i = 0; i < cw * ch; i++) {
       gray[i] = (77 * rgbaData[i * 4] + 150 * rgbaData[i * 4 + 1] + 29 * rgbaData[i * 4 + 2]) >> 8;
     }
-    var image = { pixels: gray, nrows: ch, ncols: cw, ldim: cw };
-    // Restrict search area to document crop if provided
-    var params = {
-      shiftfactor: 0.1, minsize: 20, maxsize: 400, scalefactor: 1.1,
-    };
-    var cascade = this._picoCascade;
-    var dets = pico.run_cascade(image, cascade, params, null) || [];
-    var minConf = this._minConfidence;
-    dets = dets.filter(function (d) { return d[3] > minConf; });
+
+    var image  = { pixels: gray, nrows: ch, ncols: cw, ldim: cw };
+    var params = { shiftfactor: 0.1, minsize: 20, maxsize: Math.min(cw, ch) * 0.9, scalefactor: 1.1 };
+
+    var dets = pico.run_cascade(image, this._picoCascade, params) || [];
+    // Apply NMS (non-maximum suppression) to merge overlapping boxes
+    if (typeof pico.clusterdetections === 'function') {
+      dets = pico.clusterdetections(dets, 0.2);
+    }
+    dets = dets.filter(function (d) { return d[3] > 5.0; }); // pico scores: real faces ~10-50+
     if (!dets.length) return { present: false, confidence: 0, bounds: null };
+
     var best = dets.reduce(function (a, b) { return a[3] > b[3] ? a : b; });
     var r = best[0], c = best[1], s = best[2];
-    var ox = cropBox ? cropBox.x : 0;
-    var oy = cropBox ? cropBox.y : 0;
     return {
       present:    true,
-      confidence: Math.min(1, best[3]),
-      bounds:     { x: c - s / 2 + ox, y: r - s / 2 + oy, width: s, height: s },
+      confidence: Math.min(1, best[3] / 50),
+      bounds:     { x: c - s / 2 + offsetX, y: r - s / 2 + offsetY, width: s, height: s },
     };
   };
 
@@ -3048,14 +3064,16 @@
       // Normalized quality
       var q = this._normalizeQuality(raw.report);
 
-      // Face detection (throttled, scoped to document crop on the 640px det canvas)
+      // Face detection (throttled; runs every frame, not only when corners found)
+      // When document corners are known, pass the crop box so pico focuses on the
+      // document region.  Without corners (SEARCHING state) pass null → scan full frame
+      // so the user's live face is already visible before the document is detected.
       var faceResult = null;
-      if (this._faceDetector) {
-        var detected = null;
-        if (raw.detCanvas && raw.detCorners) {
-          var cropBox = this._cornersToCropBox(raw.detCorners, raw.detCanvas.width, raw.detCanvas.height);
-          detected = await this._faceDetector.detect(raw.detCanvas, cropBox);
-        }
+      if (this._faceDetector && raw.detCanvas) {
+        var cropBox2 = raw.detCorners
+          ? this._cornersToCropBox(raw.detCorners, raw.detCanvas.width, raw.detCanvas.height)
+          : null;
+        var detected = await this._faceDetector.detect(raw.detCanvas, cropBox2);
         // Always emit at least { present: null } when the detector is active so the
         // UI face row stays visible.  detect() can return null on throttled frames
         // (before the first real sample) or when no backend loaded.
