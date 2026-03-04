@@ -12,8 +12,14 @@
       background: #1a1a2e;
       color: #fff;
       min-height: 100dvh;
-      padding: 10px;
       overflow-x: hidden;
+    }
+
+    /* ─── Page wrapper: single centred column ─── */
+    .page {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 10px;
     }
 
     h1 {
@@ -23,90 +29,48 @@
       font-size: 1.3em;
     }
 
-    /* ─────────────────── Capture area ─────────────────── */
-    /* Default (portrait / narrow): stack vertically */
-    .capture-area {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    /* Landscape / wide: side by side */
-    @media (orientation: landscape) and (min-width: 769px) {
-      .capture-area {
-        flex-direction: row;
-        align-items: flex-start;
-        gap: 15px;
-      }
-      .video-container {
-        flex: 1;
-        min-width: 0;
-        max-height: calc(100dvh - 80px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      #canvas {
-        width: auto;
-        height: auto;
-        max-width: 100%;
-        max-height: calc(100dvh - 80px);
-        border-radius: 8px;
-      }
-      .status-pane {
-        width: 300px;
-        flex-shrink: 0;
-        max-height: calc(100dvh - 80px);
-        overflow-y: auto;
-      }
-    }
-
-    /* Portrait: video fills container width, height clipped */
-    @media (orientation: portrait), (max-width: 768px) {
-      .video-container {
-        max-height: 50dvh;
-        overflow: hidden;
-      }
-      #canvas {
-        display: block;
-        width: 100%;
-        height: auto;
-        border-radius: 8px;
-      }
-    }
-
-    .video-container {
+    /* ─────────────────── Video ─────────────────── */
+    .video-wrap {
       position: relative;
       background: #000;
       border-radius: 12px;
       overflow: hidden;
+      width: 100%;
+      /* portrait: cap height so it doesn't eat the whole screen */
+      max-height: 55dvh;
     }
 
-    #video { display: none; }
-    #canvas { display: block; }
+    /* On wider / landscape screens let the video use more height */
+    @media (orientation: landscape) and (min-width: 600px) {
+      .video-wrap { max-height: 70dvh; }
+    }
+
+    #video   { display: none; }
+    #canvas  {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
 
     /* ─────────────────── Instruction banner ─────────────────── */
     #instructionBanner {
       position: absolute;
-      bottom: 12px;
-      left: 50%;
+      bottom: 12px; left: 50%;
       transform: translateX(-50%);
       background: rgba(0,0,0,0.72);
       color: #fff;
-      font-size: 13px;
-      font-weight: 600;
+      font-size: 13px; font-weight: 600;
       padding: 7px 18px;
       border-radius: 20px;
       white-space: nowrap;
       pointer-events: none;
-      max-width: 90%;
-      text-align: center;
+      max-width: 90%; text-align: center;
       display: none;
     }
     #instructionBanner.escalated { color: #ffd700; }
     #instructionBanner.good      { color: #2ed573; }
 
-    /* ─────────────────── Face badge ─────────────────── */
+    /* ─────────────────── Face badge (overlay) ─────────────────── */
     #faceBadge {
       position: absolute;
       top: 10px; right: 10px;
@@ -121,28 +85,19 @@
     #faceBadge.absent  { color: #ff4757; }
     #faceBadge.unknown { color: #aaa;    }
 
-    /* ─────────────────── Status pane ─────────────────── */
-    .status-pane {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
     /* ─────────────────── Controls ─────────────────── */
     .controls {
       display: flex;
-      gap: 8px;
       flex-wrap: wrap;
+      gap: 8px;
       justify-content: center;
-      flex-shrink: 0;
+      margin-top: 10px;
     }
 
     button {
       padding: 10px 18px;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      cursor: pointer;
+      border: none; border-radius: 8px;
+      font-size: 14px; cursor: pointer;
       transition: transform 0.1s, opacity 0.2s;
     }
     button:hover   { transform: scale(1.02); }
@@ -151,32 +106,52 @@
 
     #startBtn    { background: #00d9ff; color: #000; }
     #stopBtn     { background: #ff4757; color: #fff; }
-    #captureBtn  { background: #2ed573; color: #000; }
+    #captureBtn  { background: #2ed573; color: #000; display: none; }
     #nextSideBtn { background: #ffa502; color: #000; display: none; }
 
     /* ─────────────────── Side indicator ─────────────────── */
     #sideIndicator {
       display: none;
       text-align: center;
+      margin-top: 8px;
       padding: 6px;
-      font-size: 12px;
-      color: #aaa;
+      font-size: 12px; color: #aaa;
       background: #0f0f23;
       border-radius: 6px;
     }
 
     /* ─────────────────── Real-time quality panel ─────────────────── */
-    .status {
-      padding: 10px;
+    .quality-panel {
+      margin-top: 10px;
+      padding: 12px;
       background: #16213e;
-      border-radius: 8px;
-      text-align: center;
+      border-radius: 10px;
     }
-    .status-item   { margin: 5px 0; }
-    .status-label  { color: #888; font-size: 12px; }
-    .status-value  { font-size: 16px; font-weight: bold; }
 
-    .quality-indicators { margin-top: 10px; display: grid; gap: 5px; }
+    .qp-header {
+      text-align: center;
+      margin-bottom: 6px;
+    }
+    .qp-label { display: block; color: #888; font-size: 11px; }
+    .qp-score { display: block; font-size: 16px; font-weight: bold; }
+
+    /* 2-column grid — compact on wider screens, single-column on tiny phones */
+    .quality-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 5px;
+      margin-top: 8px;
+    }
+
+    @media (max-width: 340px) {
+      .quality-grid { grid-template-columns: 1fr; }
+    }
+
+    /* Face row spans both columns */
+    #faceIndicatorRow {
+      grid-column: 1 / -1;
+      display: none;   /* revealed by JS when face detection is active */
+    }
 
     .indicator {
       display: flex;
@@ -186,29 +161,35 @@
       border-radius: 4px;
       font-size: 12px;
     }
-    .ind-label  { flex: 1; color: #888; }
-    .ind-value  { width: 55px; text-align: right; font-family: monospace; color: #fff; font-size: 11px; }
-    .ind-status { margin-left: 6px; font-size: 12px; }
-
-    #faceIndicatorRow { display: none; }
+    .ind-label  { flex: 1; color: #888; font-size: 11px; }
+    .ind-value  { width: 46px; text-align: right; font-family: monospace; color: #fff; font-size: 11px; }
+    .ind-status { margin-left: 5px; font-size: 11px; line-height: 1; }
 
     /* ─────────────────── Hint box ─────────────────── */
     #hintBox {
       margin-top: 8px;
-      padding: 8px 10px;
+      padding: 7px 10px;
       border-radius: 6px;
-      font-size: 13px;
+      font-size: 12px;
       background: rgba(255,71,87,0.15);
       border-left: 3px solid #ff4757;
-      text-align: left;
       display: none;
     }
     #hintBox.good    { background: rgba(46,213,115,0.15); border-left-color: #2ed573; }
     #hintBox.neutral { background: rgba(0,217,255,0.12);  border-left-color: #00d9ff; }
 
-    /* ─────────────────── Config section ─────────────────── */
-    .config-section { font-size: 12px; }
-    .config-section summary { cursor: pointer; color: #00d9ff; padding: 6px 0; }
+    /* ─────────────────── Settings panel ─────────────────── */
+    .settings-panel {
+      margin-top: 8px;
+      font-size: 12px;
+    }
+    .settings-panel > summary {
+      cursor: pointer;
+      color: #00d9ff;
+      padding: 6px 2px;
+      user-select: none;
+    }
+    .settings-panel > summary::-webkit-details-marker { color: #00d9ff; }
 
     .config-grid {
       display: grid;
@@ -216,39 +197,35 @@
       gap: 8px;
       margin-top: 8px;
     }
-    .config-grid label { display: flex; flex-direction: column; gap: 3px; color: #888; font-size: 11px; }
+    .config-grid label {
+      display: flex; flex-direction: column; gap: 3px;
+      color: #888; font-size: 11px;
+    }
+    .config-grid select,
     .config-grid input {
       padding: 6px;
-      border: 1px solid #333;
-      border-radius: 4px;
-      background: #0f0f23;
-      color: #fff;
-      font-size: 12px;
-      width: 100%;
+      border: 1px solid #333; border-radius: 4px;
+      background: #0f0f23; color: #fff;
+      font-size: 12px; width: 100%;
     }
     .config-btn {
-      margin-top: 10px;
-      width: 100%;
+      margin-top: 10px; width: 100%;
       padding: 8px;
-      background: #00d9ff;
-      color: #000;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-weight: bold;
-      font-size: 12px;
+      background: #00d9ff; color: #000;
+      border: none; border-radius: 4px;
+      cursor: pointer; font-weight: bold; font-size: 12px;
     }
     .config-btn:hover { background: #00c4e6; }
 
-    /* ─────────────────── Section titles ─────────────────── */
+    /* ─────────────────── Section shared styles ─────────────────── */
     .section-title {
       color: #00d9ff;
-      font-size: 1.05em;
-      font-weight: 600;
+      font-size: 1.05em; font-weight: 600;
       margin-bottom: 8px;
+      text-align: center;        /* centered as requested */
     }
 
-    /* ─────────────────── Captured Document section ─────────────────── */
+    /* ─────────────────── Captured Document ─────────────────── */
     .captured-section { margin-top: 18px; }
 
     .captured-card {
@@ -260,57 +237,51 @@
     #result {
       background: #0f0f23;
       border-radius: 8px;
-      min-height: 100px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #555;
-      font-size: 13px;
+      min-height: 90px;
+      display: flex; align-items: center; justify-content: center;
+      color: #555; font-size: 13px;
       overflow: hidden;
     }
     #result img {
-      width: 100%;
-      height: auto;
-      display: block;
-      border-radius: 6px;
+      width: 100%; height: auto;
+      display: block; border-radius: 6px;
     }
 
     #capturedTabs {
-      display: none;           /* shown as flex when capture available */
+      display: none;   /* flex when capture available */
       gap: 6px;
       margin-top: 8px;
       justify-content: center;
     }
     .tab-btn {
       padding: 5px 14px;
-      border: 1px solid #333;
-      border-radius: 4px;
-      background: #0f0f23;
-      color: #aaa;
-      font-size: 12px;
-      cursor: pointer;
+      border: 1px solid #333; border-radius: 4px;
+      background: #0f0f23; color: #aaa;
+      font-size: 12px; cursor: pointer;
     }
     .tab-btn.active { background: #00d9ff; color: #000; border-color: #00d9ff; }
 
-    /* Quality snapshot for captured card */
+    /* Captured quality — same 2-col grid as live quality */
     #capturedQuality {
-      display: none;           /* shown as grid when capture available */
+      display: none;   /* grid when capture available */
+      grid-template-columns: repeat(2, 1fr);
       gap: 4px;
       margin-top: 8px;
     }
+    /* Face row in captured quality spans both cols */
+    #capturedQuality .cap-face { grid-column: 1 / -1; }
+
     .cap-ind {
-      display: flex;
-      align-items: center;
+      display: flex; align-items: center;
       background: #0f0f23;
-      padding: 4px 8px;
-      border-radius: 4px;
+      padding: 4px 8px; border-radius: 4px;
       font-size: 11px;
     }
     .cap-ind .ind-label  { flex: 1; color: #888; }
-    .cap-ind .ind-value  { width: 50px; text-align: right; font-family: monospace; color: #fff; }
+    .cap-ind .ind-value  { width: 46px; text-align: right; font-family: monospace; color: #fff; }
     .cap-ind .ind-status { margin-left: 5px; font-size: 11px; }
 
-    /* ─────────────────── Capture History section ─────────────────── */
+    /* ─────────────────── Capture History ─────────────────── */
     .history-section {
       margin-top: 22px;
       padding-bottom: 24px;
@@ -320,64 +291,34 @@
       border-top: 1px solid #2a2a44;
       margin-bottom: 14px;
     }
-    #historyList {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+    #historyList { display: flex; flex-direction: column; gap: 8px; }
     .history-empty {
-      color: #555;
-      font-size: 12px;
-      text-align: center;
-      padding: 16px 0;
+      color: #555; font-size: 12px;
+      text-align: center; padding: 16px 0;
     }
     .history-item {
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
+      display: flex; gap: 10px; align-items: flex-start;
       background: #16213e;
-      border-radius: 8px;
-      padding: 8px 10px;
+      border-radius: 8px; padding: 8px 10px;
     }
-    .history-thumb {
-      width: 72px;
-      flex-shrink: 0;
-    }
+    .history-thumb { width: 72px; flex-shrink: 0; }
     .history-thumb img {
-      width: 72px;
-      height: auto;
-      display: block;
-      border-radius: 4px;
+      width: 72px; height: auto;
+      display: block; border-radius: 4px;
       background: #0f0f23;
     }
     .history-thumb .no-thumb {
-      width: 72px;
-      height: 50px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #0f0f23;
-      border-radius: 4px;
-      color: #444;
-      font-size: 10px;
+      width: 72px; height: 50px;
+      display: flex; align-items: center; justify-content: center;
+      background: #0f0f23; border-radius: 4px;
+      color: #444; font-size: 10px;
     }
     .history-info { flex: 1; min-width: 0; }
-    .history-ts {
-      color: #666;
-      font-size: 10px;
-      margin-bottom: 5px;
-    }
-    .history-badges {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
+    .history-ts { color: #666; font-size: 10px; margin-bottom: 5px; }
+    .history-badges { display: flex; flex-wrap: wrap; gap: 4px; }
     .hbadge {
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 3px;
-      background: #0f0f23;
-      white-space: nowrap;
+      font-size: 10px; padding: 2px 6px;
+      border-radius: 3px; background: #0f0f23; white-space: nowrap;
     }
     .hbadge.pass    { color: #2ed573; }
     .hbadge.fail    { color: #ff4757; }
@@ -396,7 +337,7 @@
     @keyframes spin { 100% { transform: rotate(360deg); } }
 
     /* ─────────────────── Fallback / file mode ─────────────────── */
-    .video-container.fallback-mode {
+    .video-wrap.fallback-mode {
       background: transparent;
       border-radius: 0;
       overflow: visible;
@@ -404,22 +345,16 @@
     }
     #fallbackContainer {
       width: 100%;
-      display: flex;
-      flex-direction: column;
+      display: flex; flex-direction: column;
       align-items: center;
-      padding: 24px 16px;
-      gap: 14px;
+      padding: 24px 16px; gap: 14px;
     }
     .docusnap-fallback-btn {
-      width: 100%;
-      max-width: 300px;
+      width: 100%; max-width: 300px;
       padding: 14px 24px;
-      background: #00d9ff;
-      color: #000;
-      border: none;
-      border-radius: 10px;
-      font-size: 15px;
-      font-weight: 600;
+      background: #00d9ff; color: #000;
+      border: none; border-radius: 10px;
+      font-size: 15px; font-weight: 600;
       cursor: pointer;
       transition: transform 0.1s, opacity 0.2s;
       font-family: inherit;
@@ -427,44 +362,30 @@
     .docusnap-fallback-btn:hover  { transform: scale(1.02); }
     .docusnap-fallback-btn:active { transform: scale(0.98); }
     .docusnap-fallback-btn-secondary {
-      background: #2a2a44;
-      color: #ccc;
-      border: 1px solid #444;
+      background: #2a2a44; color: #ccc; border: 1px solid #444;
     }
     .docusnap-fallback-status {
-      color: #ccc;
-      font-size: 13px;
-      text-align: center;
-      padding: 0 10px;
-      min-height: 18px;
-      line-height: 1.4;
+      color: #ccc; font-size: 13px;
+      text-align: center; padding: 0 10px;
+      min-height: 18px; line-height: 1.4;
     }
     .docusnap-fallback-preview { width: 100%; max-width: 380px; }
     .docusnap-fallback-preview img {
       width: 100%; height: auto;
-      border-radius: 8px;
-      border: 2px solid #2a2a44;
-      display: block;
+      border-radius: 8px; border: 2px solid #2a2a44; display: block;
     }
     .docusnap-fallback-actions {
-      display: flex;
-      flex-direction: column;
+      display: flex; flex-direction: column;
       align-items: center;
-      width: 100%;
-      max-width: 300px;
-      gap: 8px;
+      width: 100%; max-width: 300px; gap: 8px;
     }
     .docusnap-fallback-loading {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      padding: 30px;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 12px; padding: 30px;
     }
     .docusnap-fallback-spinner {
       width: 36px; height: 36px;
-      border: 3px solid #2a2a44;
-      border-top-color: #00d9ff;
+      border: 3px solid #2a2a44; border-top-color: #00d9ff;
       border-radius: 50%;
       animation: spin 0.9s linear infinite;
     }
@@ -472,646 +393,591 @@
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>📄 docuSnap</h1>
+<div class="page">
+  <h1>📄 docuSnap</h1>
 
-    <div id="loading" class="loading">
-      <div class="loading-spinner"></div>
-      <p>Initialising…</p>
+  <div id="loading" class="loading">
+    <div class="loading-spinner"></div>
+    <p>Initialising…</p>
+  </div>
+
+  <div id="app" style="display:none;">
+
+    <!-- ══ Video preview ══ -->
+    <div class="video-wrap" id="videoContainer">
+      <video id="video" playsinline></video>
+      <canvas id="canvas" width="640" height="480"></canvas>
+      <div id="fallbackContainer" style="display:none;"></div>
+      <div id="instructionBanner"></div>
+      <div id="faceBadge">👤 –</div>
     </div>
 
-    <div id="app" style="display:none;">
+    <!-- ══ Controls — always directly beneath video ══ -->
+    <div class="controls">
+      <button id="startBtn">▶ Start Camera</button>
+      <button id="stopBtn"    disabled>⏹ Stop</button>
+      <!-- captureBtn: hidden by default; only shown in Manual mode -->
+      <button id="captureBtn" disabled>📸 Capture</button>
+      <button id="nextSideBtn">↩ Scan Other Side</button>
+    </div>
 
-      <!-- ══════════════ Capture area ══════════════ -->
-      <div class="capture-area">
+    <!-- Side progress (shown when sides > 1) -->
+    <div id="sideIndicator"></div>
 
-        <!-- Camera / fallback pane -->
-        <div class="video-container" id="videoContainer">
-          <video id="video" playsinline></video>
-          <canvas id="canvas" width="640" height="480"></canvas>
-          <div id="fallbackContainer" style="display:none;"></div>
-          <div id="instructionBanner"></div>
-          <div id="faceBadge">👤 –</div>
+    <!-- ══ Real-time quality panel ══ -->
+    <div class="quality-panel">
+      <div class="qp-header">
+        <span class="qp-label">Real-time quality assessment</span>
+        <span class="qp-score" id="score">–</span>
+      </div>
+      <div id="hintBox"></div>
+      <div class="quality-grid">
+        <div class="indicator">
+          <span class="ind-label">Sharpness</span>
+          <span class="ind-value"  id="indSharpness">–</span>
+          <span class="ind-status" id="indSharpnessStatus">⚪</span>
         </div>
-
-        <!-- Status pane: controls → quality → settings -->
-        <div class="status-pane">
-
-          <!-- Buttons: right under video in portrait, top of sidebar in landscape -->
-          <div class="controls">
-            <button id="startBtn">▶ Start Camera</button>
-            <button id="stopBtn"    disabled>⏹ Stop</button>
-            <button id="captureBtn" disabled>📸 Capture</button>
-            <button id="nextSideBtn">↩ Scan Other Side</button>
-          </div>
-
-          <!-- Side progress (shown when sides > 1) -->
-          <div id="sideIndicator"></div>
-
-          <!-- Real-time quality assessment -->
-          <div class="status">
-            <div class="status-item">
-              <div class="status-label">Real-time quality assessment</div>
-              <div class="status-value" id="score">–</div>
-            </div>
-
-            <div id="hintBox"></div>
-
-            <div class="quality-indicators">
-              <div class="indicator">
-                <span class="ind-label">Sharpness</span>
-                <span class="ind-value"  id="indSharpness">–</span>
-                <span class="ind-status" id="indSharpnessStatus">⚪</span>
-              </div>
-              <div class="indicator">
-                <span class="ind-label">Brightness</span>
-                <span class="ind-value"  id="indBrightness">–</span>
-                <span class="ind-status" id="indBrightnessStatus">⚪</span>
-              </div>
-              <div class="indicator">
-                <span class="ind-label">Glare</span>
-                <span class="ind-value"  id="indGlare">–</span>
-                <span class="ind-status" id="indGlareStatus">⚪</span>
-              </div>
-              <div class="indicator">
-                <span class="ind-label">Doc Size</span>
-                <span class="ind-value"  id="indDocSize">–</span>
-                <span class="ind-status" id="indDocSizeStatus">⚪</span>
-              </div>
-              <!-- Face row — revealed when face detection is active -->
-              <div class="indicator" id="faceIndicatorRow">
-                <span class="ind-label">Face Present</span>
-                <span class="ind-value"  id="indFace">–</span>
-                <span class="ind-status" id="indFaceStatus">⚪</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Settings -->
-          <div class="config-section">
-            <details>
-              <summary>⚙️ Settings</summary>
-              <div class="config-grid">
-                <label>Doc Type
-                  <select id="cfgDocType" style="padding:6px;border:1px solid #333;border-radius:4px;background:#0f0f23;color:#fff;font-size:12px;width:100%;">
-                    <option value="any">Any</option>
-                    <option value="id">ID Card</option>
-                    <option value="passport">Passport</option>
-                    <option value="document">Document (A4)</option>
-                  </select>
-                </label>
-                <label>Capture Mode
-                  <select id="cfgMode" style="padding:6px;border:1px solid #333;border-radius:4px;background:#0f0f23;color:#fff;font-size:12px;width:100%;">
-                    <option value="smart">Smart (auto-detect)</option>
-                    <option value="auto">Auto capture</option>
-                    <option value="manual">Manual capture</option>
-                    <option value="file">File / WebView</option>
-                  </select>
-                </label>
-                <label>Sides
-                  <select id="cfgSides" style="padding:6px;border:1px solid #333;border-radius:4px;background:#0f0f23;color:#fff;font-size:12px;width:100%;">
-                    <option value="1">1 side</option>
-                    <option value="2">2 sides</option>
-                  </select>
-                </label>
-                <label>Face Detection
-                  <select id="cfgFace" style="padding:6px;border:1px solid #333;border-radius:4px;background:#0f0f23;color:#fff;font-size:12px;width:100%;">
-                    <option value="off">Off</option>
-                    <option value="detect" selected>Detect (no requirement)</option>
-                    <option value="require">Require face present</option>
-                  </select>
-                </label>
-                <label>Sharpness Min (0-100)
-                  <input type="number" id="cfgSharpness"  value="40" min="0" max="100">
-                </label>
-                <label>Brightness Min (0-100)
-                  <input type="number" id="cfgBrightness" value="40" min="0" max="100">
-                </label>
-                <label>Glare Max (0-100)
-                  <input type="number" id="cfgGlare"      value="10" min="0" max="100">
-                </label>
-                <label>Doc Size Min (0-100)
-                  <input type="number" id="cfgDocSize"    value="40" min="0" max="100">
-                </label>
-              </div>
-              <button id="applyConfigBtn" class="config-btn">Apply &amp; Restart</button>
-            </details>
-          </div>
-
-        </div><!-- end .status-pane -->
-      </div><!-- end .capture-area -->
-
-      <!-- ══════════════ Captured Document (full width) ══════════════ -->
-      <section class="captured-section">
-        <p class="section-title">Captured Document</p>
-        <div class="captured-card">
-          <!-- Image preview -->
-          <div id="result"><span>No document captured yet</span></div>
-
-          <!-- Full Frame / Cropped ID tabs (shown only after capture) -->
-          <div id="capturedTabs">
-            <button class="tab-btn" id="tabDoc">Cropped ID</button>
-            <button class="tab-btn" id="tabFull">Full Frame</button>
-          </div>
-
-          <!-- Quality snapshot for the captured image -->
-          <div id="capturedQuality"></div>
+        <div class="indicator">
+          <span class="ind-label">Brightness</span>
+          <span class="ind-value"  id="indBrightness">–</span>
+          <span class="ind-status" id="indBrightnessStatus">⚪</span>
         </div>
-      </section>
-
-      <!-- ══════════════ Capture History (full width) ══════════════ -->
-      <section class="history-section">
-        <hr class="history-divider">
-        <p class="section-title">Capture History</p>
-        <div id="historyList">
-          <p class="history-empty">No captures yet</p>
+        <div class="indicator">
+          <span class="ind-label">Glare</span>
+          <span class="ind-value"  id="indGlare">–</span>
+          <span class="ind-status" id="indGlareStatus">⚪</span>
         </div>
-      </section>
+        <div class="indicator">
+          <span class="ind-label">Doc Size</span>
+          <span class="ind-value"  id="indDocSize">–</span>
+          <span class="ind-status" id="indDocSizeStatus">⚪</span>
+        </div>
+        <!-- Face row: spans both columns; shown when face detection active -->
+        <div class="indicator" id="faceIndicatorRow">
+          <span class="ind-label">Face Present</span>
+          <span class="ind-value"  id="indFace">–</span>
+          <span class="ind-status" id="indFaceStatus">⚪</span>
+        </div>
+      </div>
+    </div>
 
-    </div><!-- end #app -->
-  </div><!-- end .container -->
+    <!-- ══ Settings (collapsed by default) ══ -->
+    <details class="settings-panel">
+      <summary>⚙️ Settings</summary>
+      <div class="config-grid">
+        <label>Doc Type
+          <select id="cfgDocType">
+            <option value="any">Any</option>
+            <option value="id">ID Card</option>
+            <option value="passport">Passport</option>
+            <option value="document">Document (A4)</option>
+          </select>
+        </label>
+        <label>Capture Mode
+          <select id="cfgMode">
+            <option value="smart">Smart (auto-detect)</option>
+            <option value="auto">Auto capture</option>
+            <option value="manual">Manual capture</option>
+            <option value="file">File / WebView</option>
+          </select>
+        </label>
+        <label>Sides
+          <select id="cfgSides">
+            <option value="1">1 side</option>
+            <option value="2">2 sides</option>
+          </select>
+        </label>
+        <label>Face Detection
+          <select id="cfgFace">
+            <option value="off">Off</option>
+            <option value="detect" selected>Detect (no requirement)</option>
+            <option value="require">Require face present</option>
+          </select>
+        </label>
+        <label>Sharpness Min (0-100)
+          <input type="number" id="cfgSharpness"  value="40" min="0" max="100">
+        </label>
+        <label>Brightness Min (0-100)
+          <input type="number" id="cfgBrightness" value="40" min="0" max="100">
+        </label>
+        <label>Glare Max (0-100)
+          <input type="number" id="cfgGlare"      value="10" min="0" max="100">
+        </label>
+        <label>Doc Size Min (0-100)
+          <input type="number" id="cfgDocSize"    value="40" min="0" max="100">
+        </label>
+      </div>
+      <button id="applyConfigBtn" class="config-btn">Apply &amp; Restart</button>
+    </details>
 
-  <script src="../src/docusnap.js"></script>
-  <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-    initApp();
+    <!-- ══ Captured Document (full width) ══ -->
+    <section class="captured-section">
+      <p class="section-title">Captured Document</p>
+      <div class="captured-card">
+        <div id="result"><span>No document captured yet</span></div>
+        <div id="capturedTabs">
+          <button class="tab-btn" id="tabDoc">Cropped ID</button>
+          <button class="tab-btn" id="tabFull">Full Frame</button>
+        </div>
+        <!-- Quality snapshot for this capture (2-col grid, face spans both) -->
+        <div id="capturedQuality"></div>
+      </div>
+    </section>
+
+    <!-- ══ Capture History (full width) ══ -->
+    <section class="history-section">
+      <hr class="history-divider">
+      <p class="section-title">Capture History</p>
+      <div id="historyList">
+        <p class="history-empty">No captures yet</p>
+      </div>
+    </section>
+
+  </div><!-- #app -->
+</div><!-- .page -->
+
+<script src="../src/docusnap.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  initApp();
+});
+
+// ── DOM refs ──────────────────────────────────────────────────────────────
+const video             = document.getElementById('video');
+const canvas            = document.getElementById('canvas');
+const result            = document.getElementById('result');
+const capturedTabs      = document.getElementById('capturedTabs');
+const tabFull           = document.getElementById('tabFull');
+const tabDoc            = document.getElementById('tabDoc');
+const capturedQualityEl = document.getElementById('capturedQuality');
+const sideIndicator     = document.getElementById('sideIndicator');
+const scoreEl           = document.getElementById('score');
+const hintBox           = document.getElementById('hintBox');
+const banner            = document.getElementById('instructionBanner');
+const faceBadge         = document.getElementById('faceBadge');
+const historyListEl     = document.getElementById('historyList');
+
+const indSharpness        = document.getElementById('indSharpness');
+const indSharpnessStatus  = document.getElementById('indSharpnessStatus');
+const indBrightness       = document.getElementById('indBrightness');
+const indBrightnessStatus = document.getElementById('indBrightnessStatus');
+const indGlare            = document.getElementById('indGlare');
+const indGlareStatus      = document.getElementById('indGlareStatus');
+const indDocSize          = document.getElementById('indDocSize');
+const indDocSizeStatus    = document.getElementById('indDocSizeStatus');
+const faceRow             = document.getElementById('faceIndicatorRow');
+const indFace             = document.getElementById('indFace');
+const indFaceStatus       = document.getElementById('indFaceStatus');
+
+const startBtn       = document.getElementById('startBtn');
+const stopBtn        = document.getElementById('stopBtn');
+const captureBtn     = document.getElementById('captureBtn');
+const nextSideBtn    = document.getElementById('nextSideBtn');
+const applyConfig    = document.getElementById('applyConfigBtn');
+const videoContainer = document.getElementById('videoContainer');
+const fallbackCont   = document.getElementById('fallbackContainer');
+
+// ── State ─────────────────────────────────────────────────────────────────
+let snap           = null;
+let stream         = null;
+let capturedImages = { full: null, doc: null };
+let activeSide     = 0;
+
+const MAX_HISTORY    = 20;
+const captureHistory = [];
+
+// ── Config ────────────────────────────────────────────────────────────────
+function buildConfig() {
+  const docType = document.getElementById('cfgDocType').value;
+  const mode    = document.getElementById('cfgMode').value;
+  const sides   = parseInt(document.getElementById('cfgSides').value, 10) || 1;
+  const faceOpt = document.getElementById('cfgFace').value;
+
+  const nv = (id, def) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? def : v; };
+  const q = {
+    sharpness:  nv('cfgSharpness',  40),
+    brightness: nv('cfgBrightness', 40),
+    glare:      nv('cfgGlare',      10),
+    size:       nv('cfgDocSize',    40),
+  };
+
+  const faceConfig = faceOpt === 'off'
+    ? { detect: false }
+    : { detect: true, requirePresent: faceOpt === 'require' ? true : null, minConfidence: 0.6 };
+
+  return { docType, mode, sides, quality: q, faceConfig };
+}
+
+// ── Init / restart ─────────────────────────────────────────────────────────
+async function initApp() {
+  if (DocuSnap.detectCapability() === 'file') {
+    startBtn.style.display = 'none';
+    stopBtn.style.display  = 'none';
+    await startCapture(true);
+  }
+}
+
+async function startCapture(forceFile) {
+  destroySnap();
+  activeSide = 0;
+  revokeCapturedUrls();
+  resetResultPanel();
+
+  const cfg = buildConfig();
+
+  // Face detection UI visibility
+  const faceActive = cfg.faceConfig.detect;
+  faceRow.style.display   = faceActive ? '' : 'none';
+  faceBadge.style.display = faceActive ? '' : 'none';
+  if (faceActive) { faceBadge.textContent = '👤 –'; faceBadge.className = 'unknown'; }
+
+  sideIndicator.style.display = cfg.sides > 1 ? '' : 'none';
+  if (cfg.sides > 1) updateSideIndicator(0, cfg.sides);
+
+  snap = new DocuSnap({
+    documentType:      cfg.docType,
+    captureMode:       forceFile ? 'file' : cfg.mode,
+    sides:             cfg.sides,
+    quality:           cfg.quality,
+    face:              cfg.faceConfig,
+    fallbackContainer: fallbackCont,
+    onFrame:   handleFrame,
+    onCapture: handleCapture,
+    onError:   handleError,
   });
 
-  // ── DOM refs ──────────────────────────────────────────────────────────────
-  const video             = document.getElementById('video');
-  const canvas            = document.getElementById('canvas');
-  const result            = document.getElementById('result');
-  const capturedTabs      = document.getElementById('capturedTabs');
-  const tabFull           = document.getElementById('tabFull');
-  const tabDoc            = document.getElementById('tabDoc');
-  const capturedQualityEl = document.getElementById('capturedQuality');
-  const sideIndicator     = document.getElementById('sideIndicator');
-  const scoreEl           = document.getElementById('score');
-  const hintBox           = document.getElementById('hintBox');
-  const banner            = document.getElementById('instructionBanner');
-  const faceBadge         = document.getElementById('faceBadge');
-  const historyListEl     = document.getElementById('historyList');
+  if (forceFile || DocuSnap.detectCapability() === 'file') {
+    showFallbackMode();
+    await snap.start(null, null);
+  } else {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      video.srcObject = stream;
+      await video.play();
+      showCameraMode();
+      await snap.start(video, canvas);
 
-  const indSharpness        = document.getElementById('indSharpness');
-  const indSharpnessStatus  = document.getElementById('indSharpnessStatus');
-  const indBrightness       = document.getElementById('indBrightness');
-  const indBrightnessStatus = document.getElementById('indBrightnessStatus');
-  const indGlare            = document.getElementById('indGlare');
-  const indGlareStatus      = document.getElementById('indGlareStatus');
-  const indDocSize          = document.getElementById('indDocSize');
-  const indDocSizeStatus    = document.getElementById('indDocSizeStatus');
-  const faceRow             = document.getElementById('faceIndicatorRow');
-  const indFace             = document.getElementById('indFace');
-  const indFaceStatus       = document.getElementById('indFaceStatus');
+      startBtn.disabled = true;
+      stopBtn.disabled  = false;
 
-  const startBtn       = document.getElementById('startBtn');
-  const stopBtn        = document.getElementById('stopBtn');
-  const captureBtn     = document.getElementById('captureBtn');
-  const nextSideBtn    = document.getElementById('nextSideBtn');
-  const applyConfig    = document.getElementById('applyConfigBtn');
-  const videoContainer = document.getElementById('videoContainer');
-  const fallbackCont   = document.getElementById('fallbackContainer');
+      // Capture button only visible in manual mode
+      const isManual = cfg.mode === 'manual';
+      captureBtn.style.display = isManual ? '' : 'none';
+      captureBtn.disabled      = !isManual;
 
-  // ── State ─────────────────────────────────────────────────────────────────
-  let snap           = null;
-  let stream         = null;
-  let capturedImages = { full: null, doc: null };   // blob URLs for current capture display
-  let activeSide     = 0;
-
-  // In-memory capture history — newest first, max 20 entries
-  const MAX_HISTORY    = 20;
-  const captureHistory = [];
-
-  // ── Build config from UI ───────────────────────────────────────────────────
-  function buildConfig() {
-    const docType = document.getElementById('cfgDocType').value;
-    const mode    = document.getElementById('cfgMode').value;
-    const sides   = parseInt(document.getElementById('cfgSides').value, 10) || 1;
-    const faceOpt = document.getElementById('cfgFace').value;
-
-    const nv = (id, def) => { var v = parseFloat(document.getElementById(id).value); return isNaN(v) ? def : v; };
-    const q = {
-      sharpness:  nv('cfgSharpness',  40),
-      brightness: nv('cfgBrightness', 40),
-      glare:      nv('cfgGlare',      10),
-      size:       nv('cfgDocSize',    40),
-    };
-
-    const faceConfig = faceOpt === 'off'
-      ? { detect: false }
-      : { detect: true, requirePresent: faceOpt === 'require' ? true : null, minConfidence: 0.6 };
-
-    return { docType, mode, sides, quality: q, faceConfig };
-  }
-
-  // ── Init / restart ─────────────────────────────────────────────────────────
-  async function initApp() {
-    const capability = DocuSnap.detectCapability();
-    if (capability === 'file') {
-      startBtn.style.display   = 'none';
-      stopBtn.style.display    = 'none';
-      captureBtn.style.display = 'none';
-      await startCapture(true);
-    }
-  }
-
-  async function startCapture(forceFile) {
-    destroySnap();
-    activeSide = 0;
-    revokeCapturedUrls();
-    resetResultPanel();
-
-    const cfg = buildConfig();
-
-    // Face UI visibility
-    const faceActive = cfg.faceConfig.detect;
-    faceRow.style.display   = faceActive ? '' : 'none';
-    faceBadge.style.display = faceActive ? '' : 'none';
-    if (faceActive) {
-      faceBadge.textContent = '👤 –';
-      faceBadge.className   = 'unknown';
-    }
-
-    // Side indicator
-    sideIndicator.style.display = cfg.sides > 1 ? '' : 'none';
-    if (cfg.sides > 1) updateSideIndicator(0, cfg.sides);
-
-    snap = new DocuSnap({
-      documentType:      cfg.docType,
-      captureMode:       forceFile ? 'file' : cfg.mode,
-      sides:             cfg.sides,
-      quality:           cfg.quality,
-      face:              cfg.faceConfig,
-      fallbackContainer: fallbackCont,
-      onFrame:   handleFrame,
-      onCapture: handleCapture,
-      onError:   handleError,
-    });
-
-    if (forceFile || DocuSnap.detectCapability() === 'file') {
+      banner.style.display = '';
+    } catch (err) {
+      console.warn('Camera unavailable (' + err.name + ') — file mode');
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
       showFallbackMode();
       await snap.start(null, null);
-    } else {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        });
-        video.srcObject = stream;
-        await video.play();
-        showCameraMode();
-        await snap.start(video, canvas);
-
-        startBtn.disabled        = true;
-        stopBtn.disabled         = false;
-        captureBtn.style.display = cfg.mode === 'manual' ? '' : 'none';
-        captureBtn.disabled      = false;
-        banner.style.display     = '';
-      } catch (err) {
-        console.warn('Camera unavailable (' + err.name + ') — switching to file mode');
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-        showFallbackMode();
-        await snap.start(null, null);
-      }
     }
   }
+}
 
-  function destroySnap() {
-    if (snap)   { snap.destroy(); snap = null; }
-    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-    video.srcObject = null;
-  }
+function destroySnap() {
+  if (snap)   { snap.destroy(); snap = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+}
 
-  // ── Display mode helpers ───────────────────────────────────────────────────
-  function showCameraMode() {
-    canvas.style.display       = '';
-    fallbackCont.style.display = 'none';
-    videoContainer.classList.remove('fallback-mode');
+// ── Display mode helpers ───────────────────────────────────────────────────
+function showCameraMode() {
+  canvas.style.display       = '';
+  fallbackCont.style.display = 'none';
+  videoContainer.classList.remove('fallback-mode');
+  banner.style.display = '';
+}
+
+function showFallbackMode() {
+  canvas.style.display       = 'none';
+  fallbackCont.style.display = '';
+  videoContainer.classList.add('fallback-mode');
+  banner.style.display     = 'none';
+  startBtn.style.display   = 'none';
+  stopBtn.style.display    = 'none';
+  captureBtn.style.display = 'none';
+}
+
+// ── Frame handler ──────────────────────────────────────────────────────────
+function handleFrame(frame) {
+  if (banner.style.display !== 'none') {
+    banner.textContent   = frame.hint;
     banner.style.display = '';
+    banner.className =
+      frame.instructionCode === 'CONFIRMED'  ? 'good'
+    : frame.instructionCode === 'HOLD_STILL' ? 'good'
+    : frame.hintEscalated ? 'escalated' : '';
   }
 
-  function showFallbackMode() {
-    canvas.style.display       = 'none';
-    fallbackCont.style.display = '';
-    videoContainer.classList.add('fallback-mode');
-    banner.style.display     = 'none';
-    startBtn.style.display   = 'none';
-    stopBtn.style.display    = 'none';
-    captureBtn.style.display = 'none';
+  const IC = DocuSnap.InstructionCode;
+  if (frame.instructionCode === IC.CONFIRMED || frame.instructionCode === IC.HOLD_STILL) {
+    scoreEl.textContent = frame.instructionCode === IC.HOLD_STILL ? '✅ Hold still…' : '✅ Ready';
+    scoreEl.style.color = '#2ed573';
+  } else {
+    const IC_LABELS = { SHARPEN: 'TOO BLURRY' };
+    scoreEl.textContent = IC_LABELS[frame.instructionCode] || frame.instructionCode.replace(/_/g, ' ');
+    scoreEl.style.color = '#ff4757';
   }
 
-  // ── Frame handler ──────────────────────────────────────────────────────────
-  function handleFrame(frame) {
-    // Instruction banner
-    if (banner.style.display !== 'none') {
-      banner.textContent   = frame.hint;
-      banner.style.display = '';
-      banner.className =
-        frame.instructionCode === 'CONFIRMED'  ? 'good'
-      : frame.instructionCode === 'HOLD_STILL' ? 'good'
-      : frame.hintEscalated ? 'escalated' : '';
-    }
+  const isGood = (frame.instructionCode === IC.CONFIRMED || frame.instructionCode === IC.HOLD_STILL);
+  hintBox.style.display = '';
+  hintBox.textContent   = frame.hint;
+  hintBox.className     = isGood ? 'good' : (frame.hintEscalated ? '' : 'neutral');
 
-    // State label
-    const IC = DocuSnap.InstructionCode;
-    if (frame.instructionCode === IC.CONFIRMED || frame.instructionCode === IC.HOLD_STILL) {
-      scoreEl.textContent = frame.instructionCode === IC.HOLD_STILL ? '✅ Hold still…' : '✅ Ready';
-      scoreEl.style.color = '#2ed573';
+  const q = frame.quality;
+  setIndicator(indSharpness,  indSharpnessStatus,  q.sharpness,  !q.failing.includes('sharpness'),  '%');
+  setIndicator(indBrightness, indBrightnessStatus, q.brightness, !q.failing.includes('brightness'), '%');
+  setIndicator(indGlare,      indGlareStatus,      q.glare,      !q.failing.includes('glare'),      '%');
+  setIndicator(indDocSize,    indDocSizeStatus,     q.size,       !q.failing.includes('size'),       '%');
+
+  if (frame.face !== null && frame.face !== undefined) {
+    const requireFace = document.getElementById('cfgFace').value === 'require';
+    faceRow.style.display   = '';
+    faceBadge.style.display = '';
+    if (frame.face.present === null) {
+      indFace.textContent       = '–';
+      indFaceStatus.textContent = '⚪';
+      faceBadge.textContent     = '👤 –';
+      faceBadge.className       = 'unknown';
+    } else if (frame.face.present) {
+      indFace.textContent       = 'Yes';
+      indFaceStatus.textContent = requireFace ? '✅' : '⚪';
+      faceBadge.textContent     = '👤 ✓';
+      faceBadge.className       = 'present';
     } else {
-      const IC_LABELS = { SHARPEN: 'TOO BLURRY' };
-      const rawLabel  = frame.instructionCode.replace(/_/g, ' ');
-      scoreEl.textContent = IC_LABELS[frame.instructionCode] || rawLabel;
-      scoreEl.style.color = '#ff4757';
-    }
-
-    // Hint box
-    const isGood = (frame.instructionCode === IC.CONFIRMED || frame.instructionCode === IC.HOLD_STILL);
-    hintBox.style.display = '';
-    hintBox.textContent   = frame.hint;
-    hintBox.className     = isGood ? 'good' : (frame.hintEscalated ? '' : 'neutral');
-
-    // Quality indicators
-    const q = frame.quality;
-    setIndicator(indSharpness,  indSharpnessStatus,  q.sharpness,  !q.failing.includes('sharpness'),  '%');
-    setIndicator(indBrightness, indBrightnessStatus, q.brightness, !q.failing.includes('brightness'), '%');
-    setIndicator(indGlare,      indGlareStatus,      q.glare,      !q.failing.includes('glare'),      '%');
-    setIndicator(indDocSize,    indDocSizeStatus,     q.size,       !q.failing.includes('size'),       '%');
-
-    // Face detection row
-    if (frame.face !== null && frame.face !== undefined) {
-      const requireFace = document.getElementById('cfgFace').value === 'require';
-      faceRow.style.display   = '';
-      faceBadge.style.display = '';
-      if (frame.face.present === null) {
-        indFace.textContent       = '–';
-        indFaceStatus.textContent = '⚪';
-        faceBadge.textContent     = '👤 –';
-        faceBadge.className       = 'unknown';
-      } else if (frame.face.present) {
-        indFace.textContent       = 'Yes';
-        indFaceStatus.textContent = requireFace ? '✅' : '⚪';
-        faceBadge.textContent     = '👤 ✓';
-        faceBadge.className       = 'present';
-      } else {
-        indFace.textContent       = 'No';
-        indFaceStatus.textContent = requireFace ? '❌' : '⚪';
-        faceBadge.textContent     = '👤 ✗';
-        faceBadge.className       = 'absent';
-      }
+      indFace.textContent       = 'No';
+      indFaceStatus.textContent = requireFace ? '❌' : '⚪';
+      faceBadge.textContent     = '👤 ✗';
+      faceBadge.className       = 'absent';
     }
   }
+}
 
-  function setIndicator(valueEl, statusEl, value, pass, suffix) {
-    suffix = suffix || '';
-    valueEl.textContent  = typeof value === 'number' ? value.toFixed(0) + suffix : value;
-    statusEl.textContent = pass ? '✅' : '❌';
-  }
+function setIndicator(valueEl, statusEl, value, pass, suffix) {
+  valueEl.textContent  = typeof value === 'number' ? value.toFixed(0) + (suffix || '') : value;
+  statusEl.textContent = pass ? '✅' : '❌';
+}
 
-  // ── Capture handler ────────────────────────────────────────────────────────
-  function handleCapture(cr) {
-    activeSide = cr.sideIndex;
-    revokeCapturedUrls();
+// ── Capture handler ────────────────────────────────────────────────────────
+function handleCapture(cr) {
+  activeSide = cr.sideIndex;
+  revokeCapturedUrls();
 
-    // Blob URLs for the live "Captured Document" card
-    capturedImages.full = cr.image         ? URL.createObjectURL(cr.image)         : null;
-    capturedImages.doc  = cr.documentImage ? URL.createObjectURL(cr.documentImage) : null;
+  capturedImages.full = cr.image         ? URL.createObjectURL(cr.image)         : null;
+  capturedImages.doc  = cr.documentImage ? URL.createObjectURL(cr.documentImage) : null;
 
-    // Default to Cropped ID; fall back to Full Frame when no de-skew
-    if (capturedImages.doc) {
-      showResultImage(capturedImages.doc);
-      capturedTabs.style.display = 'flex';
-      tabDoc.classList.add('active');
-      tabFull.classList.remove('active');
-    } else {
-      showResultImage(capturedImages.full);
-      capturedTabs.style.display = 'none';
-    }
-
-    // Quality snapshot below the image
-    renderCapturedQuality(cr.quality, cr.face);
-
-    // Add to scrollable history (uses its own independent blob URL)
-    addToHistory(cr);
-
-    // Flash
-    result.style.boxShadow = '0 0 30px #2ed573';
-    setTimeout(() => { result.style.boxShadow = 'none'; }, 500);
-
-    // Update state label
-    scoreEl.textContent = '✅ Captured!';
-    scoreEl.style.color  = '#2ed573';
-
-    // Update face indicators from capture result
-    if (cr.face && cr.face.present !== null) {
-      const requireFace = document.getElementById('cfgFace').value === 'require';
-      indFace.textContent       = cr.face.present ? 'Yes' : 'No';
-      indFaceStatus.textContent = requireFace ? (cr.face.present ? '✅' : '❌') : '⚪';
-      faceBadge.textContent     = cr.face.present ? '👤 ✓' : '👤 ✗';
-      faceBadge.className       = cr.face.present ? 'present' : 'absent';
-    }
-
-    // Multi-side: show "Scan Other Side" button
-    if (!cr.isLastSide) {
-      nextSideBtn.style.display = '';
-      updateSideIndicator(cr.sideIndex, cr.sidesTotal);
-    } else {
-      nextSideBtn.style.display = 'none';
-      if (cr.sidesTotal > 1) updateSideIndicator(cr.sideIndex, cr.sidesTotal);
-    }
-
-    console.log('[demo] Capture:', {
-      sideIndex: cr.sideIndex, isLastSide: cr.isLastSide,
-      captureMode: cr.captureMode, quality: cr.quality,
-      hasDoc: !!cr.documentImage, hasFace: cr.face,
-    });
-  }
-
-  function handleError(err) {
-    console.error('[demo] DocuSnap error:', err);
-    scoreEl.textContent = '⚠ ' + err.code;
-    scoreEl.style.color  = '#ff4757';
-  }
-
-  // ── Captured quality snapshot ──────────────────────────────────────────────
-  function renderCapturedQuality(q, face) {
-    capturedQualityEl.innerHTML = '';
-    if (!q) { capturedQualityEl.style.display = 'none'; return; }
-
-    const metrics = [
-      { label: 'Sharpness',  value: q.sharpness,  pass: !q.failing.includes('sharpness'),  suffix: '%' },
-      { label: 'Brightness', value: q.brightness, pass: !q.failing.includes('brightness'), suffix: '%' },
-      { label: 'Glare',      value: q.glare,       pass: !q.failing.includes('glare'),      suffix: '%' },
-      { label: 'Doc Size',   value: q.size,        pass: !q.failing.includes('size'),       suffix: '%' },
-    ];
-    if (face && face.present !== null) {
-      metrics.push({ label: 'Face', value: face.present ? 'Yes' : 'No', pass: face.present === true, suffix: '' });
-    }
-
-    capturedQualityEl.style.display = 'grid';
-    metrics.forEach(function (m) {
-      const row = document.createElement('div');
-      row.className = 'cap-ind';
-      const val = typeof m.value === 'number' ? m.value.toFixed(0) + m.suffix : m.value;
-      row.innerHTML =
-        '<span class="ind-label">'  + m.label + '</span>' +
-        '<span class="ind-value">'  + val     + '</span>' +
-        '<span class="ind-status">' + (m.pass ? '✅' : '❌') + '</span>';
-      capturedQualityEl.appendChild(row);
-    });
-  }
-
-  // ── Capture history ────────────────────────────────────────────────────────
-  function addToHistory(cr) {
-    // Create an independent blob URL that won't be revoked with capturedImages
-    const thumbUrl = cr.documentImage ? URL.createObjectURL(cr.documentImage) : null;
-
-    captureHistory.unshift({
-      id:        Date.now(),
-      timestamp: new Date(),
-      thumbUrl:  thumbUrl,
-      quality:   cr.quality,
-      face:      cr.face,
-      sideIndex: cr.sideIndex,
-    });
-
-    // Drop oldest entries and revoke their URLs
-    while (captureHistory.length > MAX_HISTORY) {
-      const old = captureHistory.pop();
-      if (old.thumbUrl) URL.revokeObjectURL(old.thumbUrl);
-    }
-
-    renderHistory();
-  }
-
-  function renderHistory() {
-    historyListEl.innerHTML = '';
-    if (captureHistory.length === 0) {
-      historyListEl.innerHTML = '<p class="history-empty">No captures yet</p>';
-      return;
-    }
-
-    captureHistory.forEach(function (entry) {
-      const item = document.createElement('div');
-      item.className = 'history-item';
-
-      const q       = entry.quality;
-      const timeStr = entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-      let badges = '';
-      if (q) {
-        badges +=
-          badge('Sharp: '  + q.sharpness.toFixed(0)  + '%', !q.failing.includes('sharpness'))  +
-          badge('Bright: ' + q.brightness.toFixed(0) + '%', !q.failing.includes('brightness')) +
-          badge('Glare: '  + q.glare.toFixed(0)      + '%', !q.failing.includes('glare'))      +
-          badge('Size: '   + q.size.toFixed(0)        + '%', !q.failing.includes('size'));
-      }
-      if (entry.face && entry.face.present !== null) {
-        badges += badge('Face: ' + (entry.face.present ? 'Yes' : 'No'), entry.face.present);
-      }
-
-      const thumbHtml = entry.thumbUrl
-        ? '<img src="' + entry.thumbUrl + '" alt="capture">'
-        : '<div class="no-thumb">–</div>';
-
-      item.innerHTML =
-        '<div class="history-thumb">' + thumbHtml + '</div>' +
-        '<div class="history-info">'  +
-          '<div class="history-ts">' + timeStr + ' · Side ' + (entry.sideIndex + 1) + '</div>' +
-          '<div class="history-badges">' + badges + '</div>' +
-        '</div>';
-
-      historyListEl.appendChild(item);
-    });
-  }
-
-  function badge(label, pass) {
-    return '<span class="hbadge ' + (pass ? 'pass' : 'fail') + '">' + label + '</span>';
-  }
-
-  // ── Result / panel helpers ─────────────────────────────────────────────────
-  function showResultImage(url) {
-    if (!url) { result.innerHTML = '<span>No image available</span>'; return; }
-    const img = new Image();
-    img.style.cssText = 'width:100%;height:auto;display:block;border-radius:6px;';
-    img.onload = function () {
-      result.innerHTML = '';
-      result.appendChild(img);
-    };
-    img.src = url;
-  }
-
-  function resetResultPanel() {
-    result.innerHTML              = '<span>No document captured yet</span>';
-    capturedTabs.style.display    = 'none';
-    capturedQualityEl.style.display = 'none';
-    capturedQualityEl.innerHTML   = '';
-    nextSideBtn.style.display     = 'none';
-    scoreEl.textContent           = '–';
-    scoreEl.style.color           = '#fff';
-    hintBox.style.display         = 'none';
-    banner.style.display          = 'none';
-    banner.textContent            = '';
-  }
-
-  function updateSideIndicator(idx, total) {
-    sideIndicator.style.display = '';
-    const labels = ['Front', 'Back'];
-    sideIndicator.textContent =
-      'Side ' + (idx + 1) + ' of ' + total +
-      (labels[idx] ? ' (' + labels[idx] + ')' : '');
-  }
-
-  function revokeCapturedUrls() {
-    if (capturedImages.full) { URL.revokeObjectURL(capturedImages.full); capturedImages.full = null; }
-    if (capturedImages.doc)  { URL.revokeObjectURL(capturedImages.doc);  capturedImages.doc  = null; }
-  }
-
-  // ── Button handlers ────────────────────────────────────────────────────────
-  startBtn.addEventListener('click', () => startCapture(false));
-
-  stopBtn.addEventListener('click', () => {
-    destroySnap();
-    showCameraMode();
-    startBtn.disabled     = false;
-    stopBtn.disabled      = true;
-    captureBtn.disabled   = true;
-    banner.style.display  = 'none';
-    scoreEl.textContent   = '–';
-    scoreEl.style.color   = '#fff';
-    hintBox.style.display = 'none';
-  });
-
-  captureBtn.addEventListener('click', () => {
-    if (snap) snap.capture();
-  });
-
-  nextSideBtn.addEventListener('click', () => {
-    if (snap) {
-      nextSideBtn.style.display = 'none';
-      snap.nextSide();
-      const cfg = buildConfig();
-      updateSideIndicator(activeSide + 1, cfg.sides);
-    }
-  });
-
-  tabFull.addEventListener('click', () => {
-    tabFull.classList.add('active');
-    tabDoc.classList.remove('active');
-    showResultImage(capturedImages.full);
-  });
-
-  tabDoc.addEventListener('click', () => {
+  if (capturedImages.doc) {
+    showResultImage(capturedImages.doc);
+    capturedTabs.style.display = 'flex';
     tabDoc.classList.add('active');
     tabFull.classList.remove('active');
-    showResultImage(capturedImages.doc);
-  });
+  } else {
+    showResultImage(capturedImages.full);
+    capturedTabs.style.display = 'none';
+  }
 
-  applyConfig.addEventListener('click', () => {
-    startCapture(false);
-    applyConfig.closest('details').open = false;
+  renderCapturedQuality(cr.quality, cr.face);
+  addToHistory(cr);
+
+  result.style.boxShadow = '0 0 30px #2ed573';
+  setTimeout(() => { result.style.boxShadow = 'none'; }, 500);
+
+  scoreEl.textContent = '✅ Captured!';
+  scoreEl.style.color  = '#2ed573';
+
+  if (cr.face && cr.face.present !== null) {
+    const requireFace = document.getElementById('cfgFace').value === 'require';
+    indFace.textContent       = cr.face.present ? 'Yes' : 'No';
+    indFaceStatus.textContent = requireFace ? (cr.face.present ? '✅' : '❌') : '⚪';
+    faceBadge.textContent     = cr.face.present ? '👤 ✓' : '👤 ✗';
+    faceBadge.className       = cr.face.present ? 'present' : 'absent';
+  }
+
+  if (!cr.isLastSide) {
+    nextSideBtn.style.display = '';
+    updateSideIndicator(cr.sideIndex, cr.sidesTotal);
+  } else {
+    nextSideBtn.style.display = 'none';
+    if (cr.sidesTotal > 1) updateSideIndicator(cr.sideIndex, cr.sidesTotal);
+  }
+
+  console.log('[demo] Capture:', {
+    sideIndex: cr.sideIndex, isLastSide: cr.isLastSide,
+    captureMode: cr.captureMode, quality: cr.quality,
+    hasDoc: !!cr.documentImage, face: cr.face,
   });
-  </script>
+}
+
+function handleError(err) {
+  console.error('[demo] DocuSnap error:', err);
+  scoreEl.textContent = '⚠ ' + err.code;
+  scoreEl.style.color  = '#ff4757';
+}
+
+// ── Captured quality snapshot ──────────────────────────────────────────────
+function renderCapturedQuality(q, face) {
+  capturedQualityEl.innerHTML = '';
+  if (!q) { capturedQualityEl.style.display = 'none'; return; }
+
+  // 4 metrics in 2-column grid, face spans both columns
+  const metrics = [
+    { label: 'Sharpness',  value: q.sharpness,  pass: !q.failing.includes('sharpness'),  suffix: '%', full: false },
+    { label: 'Brightness', value: q.brightness, pass: !q.failing.includes('brightness'), suffix: '%', full: false },
+    { label: 'Glare',      value: q.glare,       pass: !q.failing.includes('glare'),      suffix: '%', full: false },
+    { label: 'Doc Size',   value: q.size,        pass: !q.failing.includes('size'),       suffix: '%', full: false },
+  ];
+  if (face && face.present !== null) {
+    metrics.push({ label: 'Face Present', value: face.present ? 'Yes' : 'No', pass: face.present === true, suffix: '', full: true });
+  }
+
+  capturedQualityEl.style.display = 'grid';
+  metrics.forEach(function (m) {
+    const row = document.createElement('div');
+    row.className = 'cap-ind' + (m.full ? ' cap-face' : '');
+    const val = typeof m.value === 'number' ? m.value.toFixed(0) + m.suffix : m.value;
+    row.innerHTML =
+      '<span class="ind-label">'  + m.label + '</span>' +
+      '<span class="ind-value">'  + val     + '</span>' +
+      '<span class="ind-status">' + (m.pass ? '✅' : '❌') + '</span>';
+    capturedQualityEl.appendChild(row);
+  });
+}
+
+// ── Capture history ────────────────────────────────────────────────────────
+function addToHistory(cr) {
+  const thumbUrl = cr.documentImage ? URL.createObjectURL(cr.documentImage) : null;
+  captureHistory.unshift({
+    id: Date.now(), timestamp: new Date(),
+    thumbUrl, quality: cr.quality, face: cr.face, sideIndex: cr.sideIndex,
+  });
+  while (captureHistory.length > MAX_HISTORY) {
+    const old = captureHistory.pop();
+    if (old.thumbUrl) URL.revokeObjectURL(old.thumbUrl);
+  }
+  renderHistory();
+}
+
+function renderHistory() {
+  historyListEl.innerHTML = '';
+  if (!captureHistory.length) {
+    historyListEl.innerHTML = '<p class="history-empty">No captures yet</p>';
+    return;
+  }
+  captureHistory.forEach(function (e) {
+    const item = document.createElement('div');
+    item.className = 'history-item';
+
+    const q   = e.quality;
+    const ts  = e.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    let badges = '';
+    if (q) {
+      badges +=
+        badge('Sharp: '  + q.sharpness.toFixed(0)  + '%', !q.failing.includes('sharpness'))  +
+        badge('Bright: ' + q.brightness.toFixed(0) + '%', !q.failing.includes('brightness')) +
+        badge('Glare: '  + q.glare.toFixed(0)      + '%', !q.failing.includes('glare'))      +
+        badge('Size: '   + q.size.toFixed(0)        + '%', !q.failing.includes('size'));
+    }
+    if (e.face && e.face.present !== null) {
+      badges += badge('Face: ' + (e.face.present ? 'Yes' : 'No'), e.face.present);
+    }
+
+    item.innerHTML =
+      '<div class="history-thumb">' +
+        (e.thumbUrl ? '<img src="' + e.thumbUrl + '" alt="capture">' : '<div class="no-thumb">–</div>') +
+      '</div>' +
+      '<div class="history-info">' +
+        '<div class="history-ts">' + ts + ' · Side ' + (e.sideIndex + 1) + '</div>' +
+        '<div class="history-badges">' + badges + '</div>' +
+      '</div>';
+
+    historyListEl.appendChild(item);
+  });
+}
+
+function badge(label, pass) {
+  return '<span class="hbadge ' + (pass ? 'pass' : 'fail') + '">' + label + '</span>';
+}
+
+// ── Result panel helpers ───────────────────────────────────────────────────
+function showResultImage(url) {
+  if (!url) { result.innerHTML = '<span>No image available</span>'; return; }
+  const img = new Image();
+  img.style.cssText = 'width:100%;height:auto;display:block;border-radius:6px;';
+  img.onload = function () { result.innerHTML = ''; result.appendChild(img); };
+  img.src = url;
+}
+
+function resetResultPanel() {
+  result.innerHTML                = '<span>No document captured yet</span>';
+  capturedTabs.style.display      = 'none';
+  capturedQualityEl.style.display = 'none';
+  capturedQualityEl.innerHTML     = '';
+  nextSideBtn.style.display       = 'none';
+  scoreEl.textContent             = '–';
+  scoreEl.style.color             = '#fff';
+  hintBox.style.display           = 'none';
+  banner.style.display            = 'none';
+  banner.textContent              = '';
+}
+
+function updateSideIndicator(idx, total) {
+  sideIndicator.style.display = '';
+  const labels = ['Front', 'Back'];
+  sideIndicator.textContent =
+    'Side ' + (idx + 1) + ' of ' + total +
+    (labels[idx] ? ' (' + labels[idx] + ')' : '');
+}
+
+function revokeCapturedUrls() {
+  if (capturedImages.full) { URL.revokeObjectURL(capturedImages.full); capturedImages.full = null; }
+  if (capturedImages.doc)  { URL.revokeObjectURL(capturedImages.doc);  capturedImages.doc  = null; }
+}
+
+// ── Button handlers ────────────────────────────────────────────────────────
+startBtn.addEventListener('click', () => startCapture(false));
+
+stopBtn.addEventListener('click', () => {
+  destroySnap();
+  showCameraMode();
+  startBtn.disabled        = false;
+  stopBtn.disabled         = true;
+  captureBtn.style.display = 'none';  // always hide on stop
+  captureBtn.disabled      = true;
+  banner.style.display     = 'none';
+  scoreEl.textContent      = '–';
+  scoreEl.style.color      = '#fff';
+  hintBox.style.display    = 'none';
+});
+
+captureBtn.addEventListener('click', () => { if (snap) snap.capture(); });
+
+nextSideBtn.addEventListener('click', () => {
+  if (snap) {
+    nextSideBtn.style.display = 'none';
+    snap.nextSide();
+    updateSideIndicator(activeSide + 1, buildConfig().sides);
+  }
+});
+
+tabFull.addEventListener('click', () => {
+  tabFull.classList.add('active'); tabDoc.classList.remove('active');
+  showResultImage(capturedImages.full);
+});
+tabDoc.addEventListener('click', () => {
+  tabDoc.classList.add('active'); tabFull.classList.remove('active');
+  showResultImage(capturedImages.doc);
+});
+
+applyConfig.addEventListener('click', () => {
+  startCapture(false);
+  applyConfig.closest('details').open = false;
+});
+</script>
 </body>
 </html>
