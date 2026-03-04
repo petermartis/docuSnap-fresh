@@ -1923,16 +1923,24 @@
       captureCanvas.width  = vw;
       captureCanvas.height = vh;
       captureCanvas.getContext("2d").drawImage(video, 0, 0);
-      // Encode the full frame for cr.imageData immediately.
-      // The raw canvas is kept alive and passed directly to extractPaper below —
-      // this avoids a lossy JPEG decode→re-encode round-trip before the warp.
       var capturedImageData = captureCanvas.toDataURL("image/jpeg", 0.95);
+      captureCanvas = null; // allow GC
 
       // ── Perspective-correct extraction ────────────────────────────────
+      // Decode the JPEG back to an <img> so that extractPaper always receives
+      // a same-origin image element — avoids canvas-taint issues that can arise
+      // when passing a video-sourced canvas directly to getImageData().
       var self = this;
       var extractedDataUrl = null;
 
       try {
+        var img = new Image();
+        await new Promise(function (resolve, reject) {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = capturedImageData;
+        });
+
         var cp = best.fullCorners;
         if (cp) {
           var _topW  = Math.hypot(cp.topRightCorner.x  - cp.topLeftCorner.x,  cp.topRightCorner.y  - cp.topLeftCorner.y);
@@ -1955,15 +1963,12 @@
               'px — below the 1920px minimum recommended by Microblink / ID R&D.' +
               ' Use a higher-resolution camera for best OCR / liveness results.');
           }
-          // Pass the raw canvas directly — no JPEG decode round-trip before the warp.
-          var extracted = await self._scanner.extractPaper(captureCanvas, docWidth, docHeight, cp, { margin: 0.25 });
+          var extracted = await self._scanner.extractPaper(img, docWidth, docHeight, cp, { margin: 0.25 });
           if (extracted) extractedDataUrl = extracted.toDataURL("image/jpeg", 0.95);
         }
       } catch (e) {
         console.error("docuSnap: extraction error:", e);
       }
-
-      captureCanvas = null; // allow GC after extraction is complete
 
       this._onStateChange(State.CAPTURED, "Document captured");
       this._onCapture({

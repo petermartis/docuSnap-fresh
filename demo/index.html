@@ -85,6 +85,25 @@
     #faceBadge.absent  { color: #ff4757; }
     #faceBadge.unknown { color: #aaa;    }
 
+    /* ─────────────────── Shutter flash overlay ─────────────────── */
+    #shutterFlash {
+      position: absolute;
+      inset: 0;
+      background: #fff;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 10;
+      border-radius: 12px;
+    }
+    @keyframes shutterFlash {
+      0%   { opacity: 0; }
+      12%  { opacity: 0.92; }
+      100% { opacity: 0; }
+    }
+    #shutterFlash.active {
+      animation: shutterFlash 0.45s ease-out forwards;
+    }
+
     /* ─────────────────── Controls ─────────────────── */
     .controls {
       display: flex;
@@ -446,6 +465,7 @@
       <div id="fallbackContainer" style="display:none;"></div>
       <div id="instructionBanner"></div>
       <div id="faceBadge">👤 –</div>
+      <div id="shutterFlash"></div>
     </div>
 
     <!-- ══ Controls — always directly beneath video ══ -->
@@ -608,6 +628,7 @@ const indFace             = document.getElementById('indFace');
 const indFaceStatus       = document.getElementById('indFaceStatus');
 
 const qualityGrid    = document.querySelector('.quality-grid');
+const shutterFlash   = document.getElementById('shutterFlash');
 const startBtn       = document.getElementById('startBtn');
 const stopBtn        = document.getElementById('stopBtn');
 const captureBtn     = document.getElementById('captureBtn');
@@ -624,6 +645,20 @@ let activeSide     = 0;
 
 const MAX_HISTORY    = 20;
 const captureHistory = [];
+
+// ── Shutter feedback (flash + sound) ──────────────────────────────────────
+const shutterAudio = new Audio('shutter.mp3');
+shutterAudio.preload = 'auto';
+
+function triggerShutter() {
+  // White flash — remove class first to allow re-triggering on consecutive captures
+  shutterFlash.classList.remove('active');
+  void shutterFlash.offsetWidth;          // force reflow to restart animation
+  shutterFlash.classList.add('active');
+  // Sound — reset to start so rapid captures always play from the top
+  shutterAudio.currentTime = 0;
+  shutterAudio.play().catch(() => {});    // silently ignore autoplay policy blocks
+}
 
 // ── Config ────────────────────────────────────────────────────────────────
 function buildConfig() {
@@ -828,6 +863,9 @@ function setIndicator(valueEl, statusEl, value, pass, suffix) {
 
 // ── Capture handler ────────────────────────────────────────────────────────
 function handleCapture(cr) {
+  // Shutter flash + sound for real camera captures (skip for file/WebView uploads)
+  if (cr.captureMode !== 'file') triggerShutter();
+
   activeSide = cr.sideIndex;
   revokeCapturedUrls();
 
