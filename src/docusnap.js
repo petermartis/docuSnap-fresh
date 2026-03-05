@@ -1609,6 +1609,8 @@
       this._candidates = [];
       this._frameBuffer = [];          // Rolling buffer of last N frames with quality
       this._frameBufferSize = options.frameBufferSize || 10;
+      this._lastGoodCorners = null;    // Previous good frame's corners for spatial consistency
+      this._cornerDriftMax = 0.12;     // Max 12% drift (fraction of frame diagonal)
       this._stayStillStart = 0;
       this._animFrameId = null;
       this._lastEvalTime = 0;
@@ -1651,6 +1653,7 @@
       this._consecutiveGoodFrames = 0;
       this._candidates = [];
       this._frameBuffer = [];
+      this._lastGoodCorners = null;
       this._evaluating = false;
       this._stableCorners = null;
       this._stableFullCorners = null;
@@ -1967,58 +1970,64 @@
       this._lastDispH  = dispH;
       this._lastReport = report;
 
+      // ── Rolling frame buffer — snapshot passing frames at full resolution ─
+      // Only accumulate when quality passes AND corners are spatially consistent.
+      if (report.allPassed && fullCorners && this._areCornersConsistent(fullCorners, vw, vh)) {
+        var frameCanvas;
+        if (this._frameBuffer.length >= this._frameBufferSize) {
+          frameCanvas = this._frameBuffer.shift().canvas;
+        } else {
+          frameCanvas = document.createElement('canvas');
+        }
+        if (frameCanvas.width !== vw || frameCanvas.height !== vh) {
+          frameCanvas.width  = vw;
+          frameCanvas.height = vh;
+        }
+        frameCanvas.getContext('2d').drawImage(video, 0, 0, vw, vh);
+        this._frameBuffer.push({
+          sharpness:   report.checks.sharpness.value,
+          fullCorners: fullCorners,
+          report:      report,
+          timestamp:   performance.now(),
+          canvas:      frameCanvas,
+        });
+        this._lastGoodCorners = fullCorners;
+      }
+
       // ── State machine ──────────────────────────────────────────────────
       if (this._state === State.DETECTING) {
-        if (report.allPassed) {
+        if (report.allPassed && fullCorners && this._areCornersConsistent(fullCorners, vw, vh)) {
           this._consecutiveGoodFrames++;
           if (this._consecutiveGoodFrames >= this._consecutiveNeeded) {
-            // Enter STAY_STILL for both auto and manual modes.
-            // This gives the user visual confirmation (bounding box + "Hold still")
-            // and acts as a stabilisation window to reject transient false detections.
-            this._state = State.STAY_STILL;
-            this._stayStillStart = performance.now();
-            this._candidates = [];
-            this._onStateChange(State.STAY_STILL, "Hold still...");
+            if (!this._manualMode) {
+              // Auto mode: pick the best from buffer and capture immediately
+              this._candidates = this._frameBuffer.slice();
+              this._selectBestFrame();
+            } else {
+              // Manual mode: enter STAY_STILL and wait for explicit capture()
+              this._state = State.STAY_STILL;
+              this._stayStillStart = performance.now();
+              this._candidates = [];
+              this._onStateChange(State.STAY_STILL, "Hold still...");
+            }
           }
         } else {
           this._consecutiveGoodFrames = 0;
-          this._emitInstruction(report);
+          if (!report.allPassed) {
+            this._emitInstruction(report);
+          }
         }
       }
 
+      // STAY_STILL is only used in manual mode
       if (this._state === State.STAY_STILL) {
         if (!report.allPassed) {
           this._state = State.DETECTING;
           this._consecutiveGoodFrames = 0;
           this._candidates = [];
-          this._frameBuffer = [];  // flush buffer — detection was inconsistent
+          this._frameBuffer = [];
+          this._lastGoodCorners = null;
           this._onStateChange(State.DETECTING, "Position document in frame");
-        } else {
-          // Accumulate candidates in the buffer (with canvas snapshots)
-          var ssCanvas;
-          if (this._frameBuffer.length >= this._frameBufferSize) {
-            ssCanvas = this._frameBuffer.shift().canvas;
-          } else {
-            ssCanvas = document.createElement('canvas');
-          }
-          if (ssCanvas.width !== vw || ssCanvas.height !== vh) {
-            ssCanvas.width  = vw;
-            ssCanvas.height = vh;
-          }
-          ssCanvas.getContext('2d').drawImage(video, 0, 0, vw, vh);
-          this._frameBuffer.push({
-            sharpness:   report.checks.sharpness.value,
-            fullCorners: fullCorners,
-            report:      report,
-            timestamp:   performance.now(),
-            canvas:      ssCanvas,
-          });
-
-          // Auto mode: capture after stabilisation timeout
-          if (!this._manualMode && performance.now() - this._stayStillStart >= this._stayStillMs) {
-            this._candidates = this._frameBuffer.slice();
-            this._selectBestFrame();
-          }
         }
       }
 
@@ -2123,6 +2132,8 @@
 
       if (!checks.cornersFound.pass) {
         instruction = "Document not detected";
+      } else if (checks.confidence && !checks.confidence.pass) {
+        instruction = "Document not detected";
       } else if (!checks.cornersWithinMargin.pass) {
         instruction = "Move document away from edges";
       } else if (!checks.documentSize.pass) {
@@ -2136,6 +2147,31 @@
       }
 
       this._onStateChange(State.DETECTING, instruction);
+    }
+
+    /**
+     * @private - Check if current corners are spatially consistent with previous good frame.
+     * Returns true if this is the first good frame OR corners haven't drifted more than
+     * _cornerDriftMax (fraction of frame diagonal).  Prevents false rectangles (wall edges,
+     * clothing) from incrementing the consecutive good frame counter.
+     */
+    _areCornersConsistent(corners, frameW, frameH) {
+      if (!this._lastGoodCorners) return true;  // first good frame — accept
+      var prev = this._lastGoodCorners;
+      var diag = Math.sqrt(frameW * frameW + frameH * frameH);
+      var maxPx = diag * this._cornerDriftMax;
+      var keys = ['topLeftCorner', 'topRightCorner', 'bottomRightCorner', 'bottomLeftCorner'];
+      for (var i = 0; i < keys.length; i++) {
+        var dx = corners[keys[i]].x - prev[keys[i]].x;
+        var dy = corners[keys[i]].y - prev[keys[i]].y;
+        if (Math.sqrt(dx * dx + dy * dy) > maxPx) {
+          // Corner jumped — reset spatial tracking
+          this._lastGoodCorners = null;
+          this._frameBuffer = [];
+          return false;
+        }
+      }
+      return true;
     }
 
     /** @private - Initialize Kalman filters for corner smoothing */
