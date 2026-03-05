@@ -15,14 +15,19 @@
 |---|---|
 | Zero dependencies | Pure vanilla JS, single self-contained UMD file (`src/docusnap.js`) |
 | Module formats | `window.DocuSnap` (browser script tag), CommonJS, AMD |
-| Document detection | Custom Hough-line corner detector; Kalman-smoothed bounding box; perspective correction via inverse homography + bilinear interpolation |
+| Document detection | Custom Hough-line corner detector with dual-zone Gaussian blur, directional morphology, and connected-component filtering for robust edge detection on textured backgrounds |
+| Corner tracking | Kalman-smoothed bounding box (Q=0.01, R=12.0) with inter-frame velocity prediction for 60 fps rendering; spatial-continuity bonus and geometry-validated line tracking across frames |
+| Perspective correction | Inverse homography (DLT) with bilinear interpolation; output at native detected dimensions (≤ 4K cap) with configurable margin |
 | Quality gate | Real-time checks for sharpness (Laplacian variance), brightness, glare, document size, corner margin — all configurable via 0–100 thresholds |
+| Best-frame selection | Rolling buffer of the last 10 full-resolution frames; on capture trigger, the frame with the highest composite score (sharpness 40%, edge confidence 30%, brightness 15%, low glare 15%) is selected |
 | Face detection | Shape Detection API (native, where available) with pico.js cascade fallback loaded on demand from CDN |
 | Multi-side scanning | 1 or 2 sides; each side independently configurable (document type, quality thresholds, face requirement) |
+| Portrait + landscape | `document` and `any` types accept portrait-orientation documents (aspect ratio ≥ 0.55); `id` type enforces landscape only |
 | Capture modes | `smart` (auto-detects camera availability), `auto` (fully automatic quality-gated), `manual` (user-triggered shutter), `file` (WebView / file-input fallback) |
 | Output | Blob images (full-frame JPEG 0.95 + perspective-corrected crop), normalized quality scores 0–100, face presence + confidence, corner coordinates, capture metadata |
 | Mobile-first | Portrait + landscape; requests up to 4K from camera; only downscales if source exceeds 4K |
 | Overlay | Live canvas overlay rendered by the library; callers receive clean callbacks with no DOM coupling beyond the `<video>` and `<canvas>` elements |
+| Debug visualization | Optional pipeline debug mode renders intermediate stages (Gaussian blur, Sobel gradients, Otsu threshold, Hough lines with tracked lines) on the preview canvas |
 
 ---
 
@@ -77,55 +82,96 @@ For the full API reference see [API.md](API.md).
 
 ---
 
-## How It Works
+## The Flow
 
 ```
 Camera frame (up to 4K)
         │
         ▼
 ┌───────────────────────────────────────────────────────┐
-│ DETECTION CANVAS  (max 640 px longest side)           │
-│  drawImage → getImageData (~0.6 MB vs 8 MB at 1080p) │
+│ DETECTION  (downscaled to 480 px wide internally)     │
 │                                                       │
-│  Grayscale → Gaussian blur (3×3)                     │
-│           → Sobel edges (Otsu auto-threshold)         │
-│           → Hough line transform (180 angles)         │
-│           → Line classification (H / V buckets)       │
-│           → Quad candidate search                     │
-│              • vanishing-point perspective check      │
-│              • convexity, diagonal-ratio guard        │
-│              • edge-support scoring                   │
-│              • parallelogram corner correction        │
-│           → Kalman smoothing (8 × KalmanFilter1D)    │
-│           → Quality gate                             │
-│              • Laplacian variance  (sharpness)        │
-│              • Mean luminance      (brightness)       │
-│              • Bright-pixel ratio  (glare)            │
-│              • Width coverage      (document size)    │
-│              • Corner margin check                    │
+│  Grayscale                                            │
+│   → Dual-zone Gaussian blur                           │
+│      • double-pass 5×5 outside center 55% ROI         │
+│      • single-pass 5×5 inside center                  │
+│   → Sobel edge detection (Otsu auto-threshold × 0.65) │
+│   → Directional morphology                            │
+│      • horizontal (5×1) + vertical (1×5) line opening │
+│      • union of both orientations                     │
+│   → Connected-component filter (remove < 80 px blobs) │
+│   → Hough line transform (180 angles)                 │
+│      • line family classification (A / B clusters)    │
+│      • weaker family boost (2.5×)                     │
+│   → Quad candidate search (top 10 H × top 10 V)      │
+│      • vanishing-point perspective check              │
+│      • convexity + diagonal-ratio guard               │
+│      • edge-support scoring (H-sides weighted 2×)     │
+│      • outer-line preference (wider pair separation)  │
+│      • spatial-continuity bonus (tracked line prox.)  │
+│      • aspect, area, center scoring                   │
+│      • parallelogram corner correction                │
+│   → Line tracking with geometry validation            │
+│      • parallel pair < 15°, perpendicular > 50°       │
+│      • confidence gate ≥ 0.20, decay after 5 misses   │
+│   → Kalman smoothing (8 × KalmanFilter1D)             │
+│      • Q = 0.01, R = 12.0                             │
+│      • inter-frame velocity prediction at 60 fps      │
+│   → Quality gate                                      │
+│      • Laplacian variance  (sharpness)                │
+│      • Mean luminance      (brightness)               │
+│      • Bright-pixel ratio  (glare)                    │
+│      • Width coverage      (document size)            │
+│      • Corner margin check                            │
 └───────────────┬───────────────────────────────────────┘
-                │ corners (det-space) + quality report
+                │ corners + quality report
                 ▼
 ┌───────────────────────────────────────────────────────┐
 │ DISPLAY CANVAS  (max 720 px longest side)             │
 │  drawImage video directly (no getImageData)           │
 │  spotlight overlay (evenodd clip path)                │
-│  corners scaled from det-space                        │
+│  3-second initial suppression (no bbox on start)      │
+│  corners rendered with Kalman + velocity prediction   │
 └───────────────┬───────────────────────────────────────┘
                 │ state machine
                 │  DETECTING → STAY_STILL → CAPTURED
                 ▼
 ┌───────────────────────────────────────────────────────┐
-│ CAPTURE  (full-resolution grab at trigger time)       │
-│  full-res frame → extractPaper()                      │
-│  inverse homography (DLT) + bilinear interpolation    │
-│  output size = native detected dimensions (≤ 4K cap)  │
-│  → Blob (JPEG 0.95) × 2  (full frame + crop)         │
+│ AUTOCAPTURE                                           │
+│  10 consecutive quality-passing frames required       │
+│  Rolling buffer: last 10 full-res frames retained     │
+│  Best-frame selection on trigger:                     │
+│    sharpness 40% + edge confidence 30%                │
+│    + brightness 15% + low glare 15%                   │
+│  → extractPaper() on the winning frame                │
+│    inverse homography (DLT) + bilinear interpolation  │
+│    output = native detected dimensions (≤ 4K cap)     │
+│  → Blob (JPEG 0.95) × 2 (full frame + corrected crop)│
 └───────────────────────────────────────────────────────┘
                 │
                 ▼
          onCapture(CaptureResult)
 ```
+
+---
+
+## Perspective Correction
+
+When a document is captured, its four detected corners are used to compute an inverse homography matrix (Direct Linear Transform). Each pixel in the output image is backward-mapped to the source frame using this matrix and sampled with bilinear interpolation. The result is a geometrically corrected, front-facing view of the document at its native resolution (up to a 4K cap). A 25% margin is added around the document region to preserve surrounding context.
+
+---
+
+## Autocapture Process
+
+1. **Detection** — The Hough-line detector runs at ~10–15 fps on a 480 px-wide downscaled frame. When a valid quad passes all geometric checks (aspect ratio, convexity, perspective consistency), its corners are smoothed through 8 independent Kalman filters (one per x/y coordinate).
+
+2. **Quality gate** — Every frame with detected corners is scored for sharpness, brightness, glare, and document size. If all four checks pass, a consecutive-good-frames counter increments.
+
+3. **Stay-still countdown** — After 10 consecutive passing frames, the library enters a brief hold-still phase to confirm stability.
+
+4. **Best-frame selection** — Throughout detection, a rolling buffer retains the last 10 full-resolution camera frames along with their quality metrics. At capture time, the frame with the highest composite score (sharpness 40%, edge-support confidence 30%, brightness 15%, low glare 15%) is selected — not necessarily the trigger frame.
+
+5. **Extraction** — The winning frame is perspective-corrected using `extractPaper()` and delivered as a high-quality JPEG Blob alongside the uncropped full-frame image.
 
 ---
 
@@ -165,6 +211,18 @@ const snap = new DocuSnap({
 
 ---
 
+## Document Types & Aspect Ratios
+
+| `documentType` | Min aspect | Max aspect | Portrait allowed | Intended use |
+|---|---|---|---|---|
+| `'id'` | 1.2 | 1.8 | No | ISO/IEC 7810 ID-1 cards, credit cards |
+| `'document'` | 0.55 | 1.6 | Yes | A4 / letter sheets (portrait 0.707 or landscape 1.414) |
+| `'any'` | 0.55 | 2.2 | Yes | General-purpose, accepts both orientations |
+
+When portrait is allowed (aspect < 1.0), the rotation-consistency check is automatically skipped to avoid rejecting correctly detected portrait documents.
+
+---
+
 ## Quality Thresholds
 
 All values are **0–100**. Internally the library maps them to raw metric ranges.
@@ -175,6 +233,19 @@ All values are **0–100**. Internally the library maps them to raw metric range
 | `brightness` | 40 | Mean pixel luminance |
 | `glare` | 18 | Fraction of overexposed pixels within document quad |
 | `size` | 40 | Document width coverage as fraction of frame |
+
+### Detection Scoring Weights
+
+Internally, quad candidates are ranked by a weighted composite score:
+
+| Component | Weight | Description |
+|---|---|---|
+| Edge support | 0.40 | Fraction of quad edges supported by actual Sobel edges (H-sides weighted 2×) |
+| Aspect score | 0.20 | Proximity to known document aspect ratios |
+| Outer score | 0.15 | Rewards wider line-pair separation (rejects inner photo borders) |
+| Area score | 0.15 | Rewards larger document coverage (`min(areaFrac / 0.45, 1.0)`) |
+| Center score | 0.10 | Proximity of quad center to frame center |
+| Proximity bonus | +0.20 | Bonus for quads whose lines are within 70 px of previously tracked lines |
 
 ---
 
@@ -195,4 +266,4 @@ All values are **0–100**. Internally the library maps them to raw metric range
 
 ## License
 
-Evaluation / Commercial — contact the author for licensing terms.
+Evaluation / Commercial — contact peter.martis@gmail.com for licensing terms.

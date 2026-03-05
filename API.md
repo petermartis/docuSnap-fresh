@@ -52,7 +52,7 @@ Creates a new DocuSnap instance. All options are optional except `onCapture`.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `documentType` | `'any' \| 'id' \| 'passport' \| 'document'` | `'any'` | Controls the aspect-ratio acceptance window used during document detection. See aspect-ratio ranges below. |
+| `documentType` | `'any' \| 'id' \| 'document'` | `'any'` | Controls the aspect-ratio acceptance window used during document detection. `'document'` and `'any'` support portrait orientation. See aspect-ratio ranges below. |
 | `captureMode` | `'smart' \| 'auto' \| 'manual' \| 'file'` | `'smart'` | How capture is triggered. `'smart'` auto-selects based on browser capability. `'auto'` uses fully automatic quality-gated capture. `'manual'` requires an explicit call to `snap.capture()`. `'file'` forces the file-input / WebView fallback path regardless of camera availability. |
 | `sides` | `1 \| 2` | `1` | Number of document sides to scan sequentially (e.g. front and back of an ID card). |
 | `sideConfig` | `SideConfig[]` | `[]` | Per-side configuration overrides. Index 0 = front, index 1 = back. Each entry can selectively override `documentType`, `quality`, and/or `face` for that side only. |
@@ -65,12 +65,13 @@ Creates a new DocuSnap instance. All options are optional except `onCapture`.
 
 ### documentType aspect-ratio ranges
 
-| Value | Min ratio | Max ratio | Intended use |
-|---|---|---|---|
-| `'id'` | 1.4 | 1.8 | ISO/IEC 7810 ID-1 cards (credit-card size) |
-| `'passport'` | 1.2 | 1.6 | ICAO 9303 passport booklets |
-| `'document'` | 1.0 | 2.0 | A4 / letter sheets |
-| `'any'` | 1.2 | 1.8 | General-purpose default |
+| Value | Min ratio | Max ratio | Portrait | Intended use |
+|---|---|---|---|---|
+| `'id'` | 1.2 | 1.8 | No | ISO/IEC 7810 ID-1 cards (credit-card size) |
+| `'document'` | 0.55 | 1.6 | Yes | A4 / letter sheets (portrait 0.707 or landscape 1.414) |
+| `'any'` | 0.55 | 2.2 | Yes | General-purpose — accepts portrait and landscape orientations |
+
+> **Portrait support:** When `documentType` is `'document'` or `'any'`, the detector accepts portrait-orientation documents (aspect ratio < 1.0). The rotation-consistency check is automatically disabled for these types.
 
 ### QualityThresholds object
 
@@ -174,6 +175,41 @@ Resume processing after a `pause()` call. Restarts the detection loop from the p
 ### `reset()`
 
 Reset to the initial state: side index returns to 0, the candidate queue is cleared, and the detection loop is restarted from the beginning. Useful when the user wants to retake a scan within the same `DocuSnap` instance.
+
+---
+
+### `setCanvasInstruction(text)`
+
+Set the instruction text shown on the canvas overlay. The text fades in/out smoothly when changed. Pass an empty string to fade out the current instruction.
+
+```js
+snap.setCanvasInstruction('Place your ID card on a flat surface');
+// Later, clear the instruction:
+snap.setCanvasInstruction('');
+```
+
+This is useful for displaying custom guidance text on the live preview canvas from within your `onFrame` callback.
+
+---
+
+### `setDebugLayer(layer)`
+
+Switch the live preview canvas to render an intermediate detection pipeline stage instead of the normal video feed. Useful for tuning and debugging the detector.
+
+```js
+snap.setDebugLayer('sobel');   // Show Sobel edge gradients
+snap.setDebugLayer('normal');  // Return to normal video view
+```
+
+| Layer value | Renders |
+|---|---|
+| `'normal'` | Default — live video with bounding-box overlay |
+| `'blur'` | Grayscale output of the dual-zone Gaussian blur stage |
+| `'sobel'` | Normalized Sobel gradient magnitude (bright = strong edge) |
+| `'otsu'` | Binary edge map after Otsu threshold + morphology + CC filter |
+| `'hough'` | Detected Hough lines (red→green gradient by vote strength) with tracked lines shown in blue |
+
+Changes apply live — no restart needed.
 
 ---
 
