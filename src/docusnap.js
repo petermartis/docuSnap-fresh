@@ -2640,39 +2640,40 @@
 
       ctx.drawImage(this._video, 0, 0, dispW, dispH);
 
-      // Inter-frame prediction: advance display corners by Kalman velocity
-      // between detection updates so the box tracks motion at 60fps.
-      // Detection runs at ~10-15fps; without this the box freezes between updates.
-      // Velocity is per-detection-step, scale to per-render-frame:
-      //   renderDt ≈ 16ms, detectionDt ≈ _frameIntervalMs (66-100ms)
+      // Don't draw overlay when captured — just show clean video feed
+      if (this._state === State.CAPTURED) return;
+
+      // Inter-frame prediction: compute predicted corners for drawing WITHOUT
+      // mutating _displayCorners. This prevents velocity drift from accumulating
+      // across render frames and avoids bowtie artifacts from corner crossing.
+      var drawCorners = this._displayCorners;
       if (this._displayCorners && this._kalmanFilters) {
         var velScale = 16.67 / (this._frameIntervalMs || 66);
         var cornerKeys = ['topLeftCorner', 'topRightCorner', 'bottomLeftCorner', 'bottomRightCorner'];
+        drawCorners = {};
         for (var i = 0; i < cornerKeys.length; i++) {
+          var key = cornerKeys[i];
           var kfX = this._kalmanFilters[i * 2];
           var kfY = this._kalmanFilters[i * 2 + 1];
-          this._displayCorners[cornerKeys[i]].x += kfX.v * velScale;
-          this._displayCorners[cornerKeys[i]].y += kfY.v * velScale;
+          drawCorners[key] = {
+            x: this._displayCorners[key].x + kfX.v * velScale,
+            y: this._displayCorners[key].y + kfY.v * velScale,
+          };
+        }
+
+        // Convexity guard: if predicted corners form a bowtie, fall back to
+        // raw _displayCorners (which are always from the Kalman filter state)
+        if (!this._isCornersConvex(drawCorners)) {
+          drawCorners = this._displayCorners;
         }
       }
-
-      // Convexity guard: bowtie corners from Kalman crossing → reset
-      if (this._displayCorners && !this._isCornersConvex(this._displayCorners)) {
-        this._displayCorners = null;
-        this._stableCorners  = null;
-        this._stableFullCorners = null;
-        this._kalmanFilters  = null;
-      }
-
-      // Don't draw overlay when captured — just show clean video feed
-      if (this._state === State.CAPTURED) return;
 
       // Suppress bounding box for first 3 seconds — let the user stabilize
       var bboxReady = this._sessionStartTime > 0 &&
                       (performance.now() - this._sessionStartTime) >= 3000;
 
-      if (bboxReady && this._displayCorners && this._lastReport) {
-        this._drawSpotlightOverlay(ctx, this._displayCorners, this._lastReport, dispW, dispH);
+      if (bboxReady && drawCorners && this._lastReport) {
+        this._drawSpotlightOverlay(ctx, drawCorners, this._lastReport, dispW, dispH);
       } else {
         ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
         ctx.fillRect(0, 0, dispW, dispH);
@@ -2857,17 +2858,12 @@
         if (report.allPassed && fullCorners && this._areCornersConsistent(fullCorners, vw, vh)) {
           this._consecutiveGoodFrames++;
           if (this._consecutiveGoodFrames >= this._consecutiveNeeded) {
-            if (!this._manualMode) {
-              // Auto mode: pick the best from buffer and capture immediately
-              this._candidates = this._frameBuffer.slice();
-              this._selectBestFrame();
-            } else {
-              // Manual mode: enter STAY_STILL and wait for explicit capture()
-              this._state = State.STAY_STILL;
-              this._stayStillStart = performance.now();
-              this._candidates = [];
-              this._onStateChange(State.STAY_STILL, "Hold still...");
-            }
+            // Enter STAY_STILL in both auto and manual mode.
+            // Auto mode: hold for stayStillDurationMs so user sees the bbox.
+            // Manual mode: hold until explicit capture() call.
+            this._state = State.STAY_STILL;
+            this._stayStillStart = performance.now();
+            this._onStateChange(State.STAY_STILL, "Hold still...");
           }
         } else {
           this._consecutiveGoodFrames = 0;
@@ -2877,16 +2873,24 @@
         }
       }
 
-      // STAY_STILL is only used in manual mode
+      // STAY_STILL: quality must stay good; auto mode captures after duration
       if (this._state === State.STAY_STILL) {
-        if (!report.allPassed) {
+        if (!report.allPassed || !fullCorners || !this._areCornersConsistent(fullCorners, vw, vh)) {
+          // Quality dropped — reset to DETECTING
           this._state = State.DETECTING;
           this._consecutiveGoodFrames = 0;
-          this._candidates = [];
           this._frameBuffer = [];
           this._lastGoodCorners = null;
           this._onStateChange(State.DETECTING, "Position document in frame");
+        } else if (!this._manualMode) {
+          // Auto mode: capture after stayStillDurationMs
+          var elapsed = performance.now() - this._stayStillStart;
+          if (elapsed >= this._stayStillMs) {
+            this._candidates = this._frameBuffer.slice();
+            this._selectBestFrame();
+          }
         }
+        // Manual mode: stay in STAY_STILL until capture() is called
       }
 
       // ── Raw frame data callback (DocuSnap public API layer) ───────────

@@ -868,7 +868,7 @@
   </div><!-- #app -->
 </div><!-- .page -->
 
-<script src="../src/docusnap.js?v=7"></script>
+<script src="../src/docusnap.js?v=8"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('loading').style.display = 'none';
@@ -1516,7 +1516,7 @@ function addToHistory(cr) {
     id: Date.now(), timestamp: cr.timestamp,
     thumbUrl, quality: cr.quality, face: cr.face, sideIndex: cr.sideIndex,
     sides: null,   // populated for grouped 2-side entries
-    livenessResult: null, ocrResult: null,
+    livenessResult: null, ocrResult: null, guruResult: null,
   });
   while (captureHistory.length > MAX_HISTORY) {
     const old = captureHistory.pop();
@@ -1542,7 +1542,7 @@ function addGroupedToHistory(allSides) {
     id: Date.now(), timestamp: last.timestamp,
     thumbUrl: null, quality: last.quality, face: last.face, sideIndex: 0,
     sides: grouped,
-    livenessResult: null, ocrResult: null,
+    livenessResult: null, ocrResult: null, guruResult: null,
   });
   while (captureHistory.length > MAX_HISTORY) {
     var old = captureHistory.pop();
