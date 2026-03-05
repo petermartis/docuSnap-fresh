@@ -1356,10 +1356,20 @@
             // areaScore rewards larger documents (peaks at ~45% of frame area = typical held-card fill).
             // Old tightness (1 - areaFrac) was backwards: it rewarded small blobs over full cards.
             var areaScore = Math.min(areaFrac / 0.45, 1.0);
-            var score = edgeSupport * 0.40
-                      + aspectScore * 0.25
-                      + areaScore   * 0.20
-                      + centerScore * 0.15;
+
+            // Outer-line preference: prefer line pairs with greater separation.
+            // Inner features (photo border, text blocks) produce parallel lines
+            // closer together; the true card border is the outermost pair.
+            // hSep/vSep → 1.0 when lines span most of the frame dimension.
+            var hSep = Math.min(hDist / (ph * 0.6), 1.0);
+            var vSep = Math.min(vDist / (pw * 0.6), 1.0);
+            var outerScore = (hSep + vSep) / 2;
+
+            var score = edgeSupport * 0.35
+                      + aspectScore * 0.20
+                      + areaScore   * 0.15
+                      + centerScore * 0.15
+                      + outerScore  * 0.15;
 
             // Tracking proximity bonus: when we have known lines from a
             // previous frame, boost quads whose lines are close to them.
