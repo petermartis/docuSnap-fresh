@@ -2296,7 +2296,12 @@
       }
 
       this._debugImageDataSmall = new ImageData(rgba, pw, ph);
-      this._debugDataForHough = (layer === 'hough') ? d : null;
+      if (layer === 'hough') {
+        d.knownLines = detector._knownLines || null;
+        this._debugDataForHough = d;
+      } else {
+        this._debugDataForHough = null;
+      }
     }
 
     /**
@@ -2386,6 +2391,38 @@
         }
         label += line._family ? ' ' + line._family : ' ?';
         ctx.fillText(label, mx + 2, my + 2);
+      }
+
+      // Draw tracked (known) lines in blue
+      var known = data.knownLines;
+      if (known && known.length > 0) {
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = '#00aaff';
+        ctx.globalAlpha = 0.9;
+        ctx.setLineDash([6, 3]);
+        for (var i = 0; i < known.length; i++) {
+          var kl = known[i];
+          var cosT = Math.cos(kl.theta);
+          var sinT = Math.sin(kl.theta);
+          var x0, y0, x1, y1;
+          if (Math.abs(sinT) > 0.001) {
+            x0 = 0; y0 = kl.rho / sinT;
+            x1 = pw - 1; y1 = (kl.rho - x1 * cosT) / sinT;
+          } else {
+            x0 = kl.rho / cosT; y0 = 0;
+            x1 = x0; y1 = ph - 1;
+          }
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1.0;
+        // Label
+        ctx.fillStyle = '#00aaff';
+        ctx.font = '10px monospace';
+        ctx.fillText('TRACKED: ' + known.length + ' lines', 4, ph - 6);
       }
     }
 
