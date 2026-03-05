@@ -65,8 +65,11 @@
       white-space: nowrap;
       pointer-events: none;
       max-width: 90%; text-align: center;
-      display: none;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      z-index: 5;
     }
+    #instructionBanner.visible   { opacity: 1; }
     #instructionBanner.escalated { color: #ffd700; }
     #instructionBanner.good      { color: #2ed573; }
 
@@ -868,7 +871,7 @@
   </div><!-- #app -->
 </div><!-- .page -->
 
-<script src="../src/docusnap.js?v=8"></script>
+<script src="../src/docusnap.js?v=9"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('loading').style.display = 'none';
@@ -1105,7 +1108,7 @@ async function startCapture(forceFile) {
       captureBtn.style.display = isManual ? '' : 'none';
       captureBtn.disabled      = !isManual;
 
-      banner.style.display = '';
+      banner._enabled = true;
     } catch (err) {
       console.warn('Camera unavailable (' + err.name + ') — file mode');
       if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
@@ -1128,14 +1131,14 @@ function showCameraMode() {
   canvas.style.display       = '';
   fallbackCont.style.display = 'none';
   videoContainer.classList.remove('fallback-mode');
-  banner.style.display = '';
+  banner._enabled = true;
 }
 
 function showFallbackMode() {
   canvas.style.display       = 'none';
   fallbackCont.style.display = '';
   videoContainer.classList.add('fallback-mode');
-  banner.style.display     = 'none';
+  banner._enabled = false; banner.className = '';
   startBtn.style.display   = 'none';
   stopBtn.style.display    = 'none';
   captureBtn.style.display = 'none';
@@ -1200,13 +1203,12 @@ function handleFrame(frame) {
   qualityGrid.classList.toggle('inactive', searching);
 
   // Instruction banner (overlay on video) — uses throttled code/hint
-  if (banner.style.display !== 'none') {
-    banner.textContent   = _dispHint;
-    banner.style.display = '';
-    banner.className =
-      _dispCode === 'CONFIRMED'  ? 'good'
-    : _dispCode === 'HOLD_STILL' ? 'good'
-    : _dispEscalated ? 'escalated' : '';
+  if (banner._enabled) {
+    banner.textContent = _dispHint;
+    var cls = 'visible';
+    if (_dispCode === 'CONFIRMED' || _dispCode === 'HOLD_STILL') cls += ' good';
+    else if (_dispEscalated) cls += ' escalated';
+    banner.className = cls;
   }
 
   // Score / state line — shows raw instruction code name
@@ -1351,7 +1353,7 @@ function handleCapture(cr) {
         sideSteps.style.display = 'none';
         sideSteps.innerHTML     = '';
         snap.reset();
-        banner.style.display = '';
+        banner._enabled = true;
         startBtn.disabled = true;
         stopBtn.disabled  = false;
       }
@@ -1684,8 +1686,7 @@ function resetResultPanel() {
   scoreEl.textContent             = '–';
   scoreEl.style.color             = '#fff';
   hintBox.style.display           = 'none';
-  banner.style.display            = 'none';
-  banner.textContent              = '';
+  banner._enabled = false; banner.className = ''; banner.textContent = '';
   capturedSides                   = [];
   flipPromptEl.style.display      = 'none';
   sideSteps.style.display         = 'none';
@@ -2236,7 +2237,7 @@ stopBtn.addEventListener('click', () => {
   captureBtn.style.display     = 'none';  // always hide on stop
   captureBtn.disabled          = true;
   if (_autoRestartTimer) { clearTimeout(_autoRestartTimer); _autoRestartTimer = null; }
-  banner.style.display     = 'none';
+  banner._enabled = false; banner.className = '';
   scoreEl.textContent      = '–';
   scoreEl.style.color      = '#fff';
   hintBox.style.display    = 'none';
