@@ -586,7 +586,7 @@
     var margin = Math.round(w * 0.1);
     var roi = { x0: margin, y0: margin, x1: w - margin - 1, y1: h - margin - 1 };
     var threshold = this._otsuThresholdROI(mag, w, h, clampVal, roi);
-    threshold *= 0.7;  // slightly tighter — suppress wood-grain texture
+    threshold *= 0.65;  // balanced — suppress texture but keep weak card edges
 
     // 4. Binarize
     var edges = new Uint8Array(w * h);
@@ -597,15 +597,15 @@
     // 5. Directional morphology: opening with line SEs favors long straight
     //    edges (card borders) over small isotropic texture blobs (wood grain).
     //    Union of H-opening and V-opening preserves both orientations.
-    var openH = this._morphOpenLineH(edges, w, h, 7);
-    var openV = this._morphOpenLineV(edges, w, h, 7);
+    var openH = this._morphOpenLineH(edges, w, h, 5);
+    var openV = this._morphOpenLineV(edges, w, h, 5);
     for (var i = 0; i < w * h; i++) {
       edges[i] = (openH[i] || openV[i]) ? 255 : 0;
     }
 
     // 6. Connected-component filter: remove blobs < minArea pixels.
     //    Wood grain produces many small blobs; card border is a large component.
-    edges = this._removeSmallComponents(edges, w, h, 200);
+    edges = this._removeSmallComponents(edges, w, h, 80);
 
     // Cache for debug visualization
     this._lastSobelMag = mag;
@@ -1361,6 +1361,31 @@
                       + areaScore   * 0.20
                       + centerScore * 0.15;
 
+            // Tracking proximity bonus: when we have known lines from a
+            // previous frame, boost quads whose lines are close to them.
+            // This prevents the tracker from jumping to a distant line
+            // just because it got a few more votes this frame.
+            if (self._knownLines && self._knownLines.length === 4) {
+              var quadLines = [h1, h2, v1, v2];
+              var totalProx = 0;
+              for (var ki = 0; ki < 4; ki++) {
+                var kl = self._knownLines[ki];
+                // Find closest quad line to this known line
+                var bestDist = Infinity;
+                for (var qi = 0; qi < 4; qi++) {
+                  var dRho = Math.abs(quadLines[qi].rho - kl.rho);
+                  var dTheta = Math.abs(quadLines[qi].theta - kl.theta);
+                  if (dTheta > Math.PI / 2) dTheta = Math.PI - dTheta;
+                  var dist = dRho + dTheta * 50; // weight theta heavily
+                  if (dist < bestDist) bestDist = dist;
+                }
+                // Proximity score: 1.0 when exact match, 0.0 when > 70px away
+                totalProx += Math.max(0, 1.0 - bestDist / 70);
+              }
+              var proxScore = totalProx / 4; // average over 4 known lines
+              score += proxScore * 0.20; // up to 0.20 bonus for continuity
+            }
+
             if (score > bestScore) {
               bestScore = score;
               var invScale = 1 / scale;
@@ -1387,6 +1412,7 @@
       }
     }
 
+    this._lastRejections = _rej;
     if (_dbg) console.log('[docuSnap] rejection counts:', _rej, '| best score:', bestResult ? Math.round((bestResult.confidence||0)*100)+'%' : 'none');
     return bestResult;
   };
@@ -2298,6 +2324,7 @@
       this._debugImageDataSmall = new ImageData(rgba, pw, ph);
       if (layer === 'hough') {
         d.knownLines = detector._knownLines || null;
+        d.rejections = detector._lastRejections || null;
         this._debugDataForHough = d;
       } else {
         this._debugDataForHough = null;
@@ -2423,6 +2450,37 @@
         ctx.fillStyle = '#00aaff';
         ctx.font = '10px monospace';
         ctx.fillText('TRACKED: ' + known.length + ' lines', 4, ph - 6);
+      }
+
+      // Draw rejection stats overlay
+      var rej = data.rejections;
+      if (rej) {
+        ctx.font = '9px monospace';
+        ctx.fillStyle = '#ff8800';
+        ctx.globalAlpha = 1.0;
+        // Only show non-zero rejections
+        var parts = [];
+        if (rej.hAngle)   parts.push('hAng:' + rej.hAngle);
+        if (rej.hVP)      parts.push('hVP:' + rej.hVP);
+        if (rej.hDist)    parts.push('hDist:' + rej.hDist);
+        if (rej.vAngle)   parts.push('vAng:' + rej.vAngle);
+        if (rej.vVP)      parts.push('vVP:' + rej.vVP);
+        if (rej.vDist)    parts.push('vDist:' + rej.vDist);
+        if (rej.corners)  parts.push('corn:' + rej.corners);
+        if (rej.size)     parts.push('size:' + rej.size);
+        if (rej.edgeRatio) parts.push('eRat:' + rej.edgeRatio);
+        if (rej.aspect)   parts.push('asp:' + rej.aspect);
+        if (rej.docSize)  parts.push('dSiz:' + rej.docSize);
+        if (rej.convex)   parts.push('cvx:' + rej.convex);
+        if (rej.diag)     parts.push('diag:' + rej.diag);
+        if (rej.angles)   parts.push('angl:' + rej.angles);
+        if (rej.rotation) parts.push('rot:' + rej.rotation);
+        if (rej.symmetry) parts.push('sym:' + rej.symmetry);
+        if (rej.edgeSupport) parts.push('eSup:' + rej.edgeSupport);
+        var line1 = parts.slice(0, 6).join('  ');
+        var line2 = parts.slice(6).join('  ');
+        ctx.fillText('REJ: ' + line1, 4, 10);
+        if (line2) ctx.fillText('     ' + line2, 4, 20);
       }
     }
 
