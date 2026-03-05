@@ -338,8 +338,9 @@
       }
     }
 
-    // 2. Gaussian blur
-    var blurred = this._gaussianBlur5x5(gray, pw, ph);
+    // 2. Dual-zone Gaussian blur: heavier (two-pass 5x5) outside center ROI,
+    //    standard 5x5 in center where card is expected — suppresses desk texture
+    var blurred = this._dualZoneBlur(gray, pw, ph);
 
     // 3. Sobel edge detection with gradient magnitude
     var edges = this._sobelEdges(blurred, pw, ph);
@@ -519,6 +520,38 @@
   };
 
   /**
+   * @private - Dual-zone blur: standard 5×5 on center 55% of frame where the
+   * card is expected, double-pass 5×5 (~9×9 effective σ≈1.4) on the outer band
+   * to suppress desk/wood texture while keeping card edges sharp.
+   */
+  DocumentDetector.prototype._dualZoneBlur = function (gray, w, h) {
+    // First pass: full-frame 5×5
+    var pass1 = this._gaussianBlur5x5(gray, w, h);
+    // Second pass on the whole frame (only outer band will be used)
+    var pass2 = this._gaussianBlur5x5(pass1, w, h);
+
+    // Define center ROI (55% of frame)
+    var cx0 = Math.round(w * 0.225);
+    var cy0 = Math.round(h * 0.225);
+    var cx1 = Math.round(w * 0.775);
+    var cy1 = Math.round(h * 0.775);
+
+    // Composite: center keeps single-pass, outside uses double-pass
+    var out = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var idx = y * w + x;
+        if (x >= cx0 && x <= cx1 && y >= cy0 && y <= cy1) {
+          out[idx] = pass1[idx];
+        } else {
+          out[idx] = pass2[idx];
+        }
+      }
+    }
+    return out;
+  };
+
+  /**
    * @private - Sobel edge detection with clamped Otsu and morphological cleanup.
    * Returns binary edge map (Uint8Array: 255=edge, 0=not).
    *
@@ -553,7 +586,7 @@
     var margin = Math.round(w * 0.1);
     var roi = { x0: margin, y0: margin, x1: w - margin - 1, y1: h - margin - 1 };
     var threshold = this._otsuThresholdROI(mag, w, h, clampVal, roi);
-    threshold *= 0.6;  // permissive — keep weak border edges
+    threshold *= 0.7;  // slightly tighter — suppress wood-grain texture
 
     // 4. Binarize
     var edges = new Uint8Array(w * h);
@@ -561,9 +594,18 @@
       edges[i] = mag[i] >= threshold ? 255 : 0;
     }
 
-    // 5. Gentle morphology: closing only (bridge gaps), soft erosion
-    edges = this._dilate3x3(edges, w, h);
-    edges = this._erode3x3Soft(edges, w, h);
+    // 5. Directional morphology: opening with line SEs favors long straight
+    //    edges (card borders) over small isotropic texture blobs (wood grain).
+    //    Union of H-opening and V-opening preserves both orientations.
+    var openH = this._morphOpenLineH(edges, w, h, 7);
+    var openV = this._morphOpenLineV(edges, w, h, 7);
+    for (var i = 0; i < w * h; i++) {
+      edges[i] = (openH[i] || openV[i]) ? 255 : 0;
+    }
+
+    // 6. Connected-component filter: remove blobs < minArea pixels.
+    //    Wood grain produces many small blobs; card border is a large component.
+    edges = this._removeSmallComponents(edges, w, h, 200);
 
     // Cache for debug visualization
     this._lastSobelMag = mag;
@@ -673,6 +715,102 @@
         }
         if (count >= 5) out[y * w + x] = 255;
       }
+    }
+    return out;
+  };
+
+  /** @private - Morphological opening with horizontal line SE of given length.
+   *  Erode then dilate horizontally: only structures >= len pixels wide survive. */
+  DocumentDetector.prototype._morphOpenLineH = function (bin, w, h, len) {
+    var half = (len - 1) >> 1;
+    // Erode: pixel survives only if all 'len' horizontal neighbors are set
+    var eroded = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      for (var x = half; x < w - half; x++) {
+        var allSet = true;
+        for (var dx = -half; dx <= half; dx++) {
+          if (!bin[y * w + x + dx]) { allSet = false; break; }
+        }
+        if (allSet) eroded[y * w + x] = 255;
+      }
+    }
+    // Dilate: spread surviving pixels back along the horizontal line
+    var out = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) {
+      for (var x = half; x < w - half; x++) {
+        if (eroded[y * w + x]) {
+          for (var dx = -half; dx <= half; dx++) out[y * w + x + dx] = 255;
+        }
+      }
+    }
+    return out;
+  };
+
+  /** @private - Morphological opening with vertical line SE of given length.
+   *  Erode then dilate vertically: only structures >= len pixels tall survive. */
+  DocumentDetector.prototype._morphOpenLineV = function (bin, w, h, len) {
+    var half = (len - 1) >> 1;
+    var eroded = new Uint8Array(w * h);
+    for (var y = half; y < h - half; y++) {
+      for (var x = 0; x < w; x++) {
+        var allSet = true;
+        for (var dy = -half; dy <= half; dy++) {
+          if (!bin[(y + dy) * w + x]) { allSet = false; break; }
+        }
+        if (allSet) eroded[y * w + x] = 255;
+      }
+    }
+    var out = new Uint8Array(w * h);
+    for (var y = half; y < h - half; y++) {
+      for (var x = 0; x < w; x++) {
+        if (eroded[y * w + x]) {
+          for (var dy = -half; dy <= half; dy++) out[(y + dy) * w + x] = 255;
+        }
+      }
+    }
+    return out;
+  };
+
+  /**
+   * @private - Remove connected components smaller than minArea pixels.
+   * Uses flood-fill (BFS) on 4-connected neighbors. Wood texture produces
+   * many tiny blobs; card borders form large connected components that survive.
+   */
+  DocumentDetector.prototype._removeSmallComponents = function (bin, w, h, minArea) {
+    var labels = new Int32Array(w * h); // 0 = unlabeled
+    var label = 0;
+    var areas = [];   // areas[label] = pixel count
+    var queue = [];
+
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var idx = y * w + x;
+        if (bin[idx] && !labels[idx]) {
+          label++;
+          var area = 0;
+          queue.length = 0;
+          queue.push(idx);
+          labels[idx] = label;
+          var head = 0;
+          while (head < queue.length) {
+            var ci = queue[head++];
+            area++;
+            var cx = ci % w, cy = (ci - cx) / w;
+            // 4-connected neighbors
+            if (cx > 0     && bin[ci - 1] && !labels[ci - 1]) { labels[ci - 1] = label; queue.push(ci - 1); }
+            if (cx < w - 1 && bin[ci + 1] && !labels[ci + 1]) { labels[ci + 1] = label; queue.push(ci + 1); }
+            if (cy > 0     && bin[ci - w] && !labels[ci - w]) { labels[ci - w] = label; queue.push(ci - w); }
+            if (cy < h - 1 && bin[ci + w] && !labels[ci + w]) { labels[ci + w] = label; queue.push(ci + w); }
+          }
+          areas[label] = area;
+        }
+      }
+    }
+
+    // Zero out small components
+    var out = new Uint8Array(w * h);
+    for (var i = 0; i < w * h; i++) {
+      if (labels[i] && areas[labels[i]] >= minArea) out[i] = 255;
     }
     return out;
   };
@@ -933,7 +1071,7 @@
     // --- Step 4: compute effVotes with relative boosting ---
     // Boost the weaker family so short sides compete
     var boostFactor = 1.5; // parallel cluster boost
-    var weakBoost = 1.8;   // extra boost for the weaker family
+    var weakBoost = 2.5;   // extra boost for the weaker family
     var totalA = 0, totalB = 0;
     for (var i = 0; i < familyA.length; i++) totalA += familyA[i].votes;
     for (var i = 0; i < familyB.length; i++) totalB += familyB[i].votes;
