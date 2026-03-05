@@ -2260,6 +2260,7 @@
       this._prevInstructionText = '';
       // Persistent small canvas reused every frame for detection (avoids per-frame allocation)
       if (!this._detCanvas) this._detCanvas = document.createElement("canvas");
+      this._sessionStartTime = performance.now(); // suppress bbox for first 3s
       this._onStateChange(State.DETECTING, "Position document in frame");
       this._tick();
     }
@@ -2661,7 +2662,11 @@
       // Don't draw overlay when captured — just show clean video feed
       if (this._state === State.CAPTURED) return;
 
-      if (this._displayCorners && this._lastReport) {
+      // Suppress bounding box for first 3 seconds — let the user stabilize
+      var sessionAge = performance.now() - (this._sessionStartTime || 0);
+      var bboxReady = sessionAge >= 3000;
+
+      if (bboxReady && this._displayCorners && this._lastReport) {
         this._drawSpotlightOverlay(ctx, this._displayCorners, this._lastReport, dispW, dispH);
       } else {
         ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
