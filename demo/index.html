@@ -85,6 +85,16 @@
     #faceBadge.absent  { color: #ff4757; }
     #faceBadge.unknown { color: #aaa;    }
 
+    /* ─────────────────── API wait popup ─────────────────── */
+    #apiWaitPopup {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(0,0,0,0.85); color: #fff; padding: 16px 28px;
+      border-radius: 10px; font-size: 14px; font-weight: 600;
+      z-index: 100; display: none; text-align: center;
+      backdrop-filter: blur(4px); box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    }
+    #apiWaitPopup .api-spin { margin-right: 8px; }
+
     /* ─────────────────── Shutter flash overlay ─────────────────── */
     #shutterFlash {
       position: absolute;
@@ -101,7 +111,7 @@
       100% { opacity: 0; }
     }
     #shutterFlash.active {
-      animation: shutterFlash 0.45s ease-out forwards;
+      animation: shutterFlash 0.9s ease-out forwards;
     }
 
     /* ─────────────────── Controls ─────────────────── */
@@ -495,23 +505,24 @@
       margin-top: 10px;
     }
     .api-btn-row {
-      display: flex; gap: 8px;
-      justify-content: center; flex-wrap: wrap;
+      display: flex; gap: 6px;
+      justify-content: center; flex-wrap: nowrap;
     }
     .api-btn {
-      padding: 8px 18px;
+      padding: 7px 12px;
       border: none; border-radius: 6px;
-      font-size: 12px; font-weight: 700;
+      font-size: 11px; font-weight: 700;
       cursor: pointer; font-family: inherit;
       transition: transform 0.1s, opacity 0.2s;
-      display: inline-flex; align-items: center; gap: 6px;
+      display: inline-flex; align-items: center; gap: 4px;
+      white-space: nowrap; flex: 1; justify-content: center;
     }
     .api-btn:hover   { transform: scale(1.02); }
     .api-btn:active  { transform: scale(0.97); }
     .api-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-    .api-btn-liveness { background: #9b59b6; color: #fff; }
+    .api-btn-liveness { background: #2980b9; color: #fff; }
     .api-btn-ocr      { background: #2980b9; color: #fff; }
-    .api-btn-guru     { background: #e67e22; color: #fff; }
+    .api-btn-guru     { background: #2980b9; color: #fff; }
 
     /* One-line API result row — same grid as quality indicators */
     #apiResultsRow {
@@ -666,6 +677,7 @@
       <div id="faceBadge">👤 –</div>
       <div id="shutterFlash"></div>
     </div>
+    <div id="apiWaitPopup"></div>
 
     <!-- ══ Controls — always directly beneath video ══ -->
     <div class="controls">
@@ -828,9 +840,9 @@
         <!-- External API actions: shown when Cropped tab is active or two-up is rendered -->
         <div id="apiActions">
           <div class="api-btn-row">
-            <button id="livenessBtn" class="api-btn api-btn-liveness">🔍 Check Liveness</button>
-            <button id="ocrBtn"      class="api-btn api-btn-ocr">📋 Send to OCR</button>
-            <button id="guruBtn"     class="api-btn api-btn-guru">🧠 Document Guru</button>
+            <button id="livenessBtn" class="api-btn api-btn-liveness">Liveness Check</button>
+            <button id="ocrBtn"      class="api-btn api-btn-ocr">Microblink OCR</button>
+            <button id="guruBtn"     class="api-btn api-btn-guru">Doc.Guru</button>
           </div>
           <!-- One-line results row (liveness + OCR summary badges) -->
           <div id="apiResultsRow"></div>
@@ -919,6 +931,16 @@ let _autoRestartTimer = null;  // setTimeout ID for auto-restart after capture
 
 const MAX_HISTORY    = 20;
 const captureHistory = [];
+
+// ── API wait popup ────────────────────────────────────────────────────────
+const apiWaitPopup = document.getElementById('apiWaitPopup');
+function showApiWait(vendor) {
+  apiWaitPopup.innerHTML = '<span class="api-spin"></span> Waiting for ' + vendor + '...';
+  apiWaitPopup.style.display = 'block';
+}
+function hideApiWait() {
+  apiWaitPopup.style.display = 'none';
+}
 
 // ── Shutter feedback (flash + sound) ──────────────────────────────────────
 const shutterAudio = new Audio('shutter.mp3');
@@ -1599,6 +1621,16 @@ function renderHistory() {
       }
     }
 
+    // Guru badge
+    if (e.guruResult) {
+      var gd = e.guruResult;
+      var guruLabel = gd.document_category || 'Analysed';
+      var guruConf = typeof gd.classification_confidence === 'number'
+        ? ' ' + (gd.classification_confidence * 100).toFixed(0) + '%' : '';
+      badges += '<span class="hbadge hbadge-ocr">Guru: <span class="hb-val">' +
+                guruLabel + guruConf + '</span></span>';
+    }
+
     // Thumbnail(s)
     var imgHtml = '';
     if (e.sides && e.sides.length > 1) {
@@ -1732,6 +1764,7 @@ async function checkLiveness() {
   livenessBtn.disabled = true;
   livenessBtn.innerHTML = '<span class="api-spin"></span> Checking…';
   apiResultsRow.style.display = 'none';
+  showApiWait('ID R&D');
 
   try {
     var b64 = await blobToBase64(blob);
@@ -1763,8 +1796,9 @@ async function checkLiveness() {
     apiResultsRow.innerHTML =
       '<span style="color:#ff4757;font-size:11px;">⚠ Liveness error: ' + livMsg + '</span>';
   } finally {
+    hideApiWait();
     livenessBtn.disabled = false;
-    livenessBtn.innerHTML = '🔍 Check Liveness';
+    livenessBtn.innerHTML = 'Liveness Check';
   }
 }
 
@@ -1775,6 +1809,7 @@ async function sendToOCR() {
 
   ocrBtn.disabled = true;
   ocrBtn.innerHTML = '<span class="api-spin"></span> Scanning…';
+  showApiWait('Microblink');
 
   try {
     var front     = _sides.find(function (cr) { return cr.sideIndex === 0; });
@@ -1841,8 +1876,9 @@ async function sendToOCR() {
       '<div class="ocr-hdr">OCR Error</div>' +
       '<div style="color:#ff4757;font-size:11px;">' + err.message + '</div>';
   } finally {
+    hideApiWait();
     ocrBtn.disabled = false;
-    ocrBtn.innerHTML = '📋 Send to OCR';
+    ocrBtn.innerHTML = 'Microblink OCR';
   }
 }
 
@@ -2044,6 +2080,7 @@ async function sendToGuru() {
 
   guruBtn.disabled = true;
   guruBtn.innerHTML = '<span class="api-spin"></span> Analysing…';
+  showApiWait('Anthropic');
 
   try {
     var front     = _sides.find(function (cr) { return cr.sideIndex === 0; });
@@ -2111,8 +2148,9 @@ async function sendToGuru() {
       '<div class="guru-hdr">Document Guru Error</div>' +
       '<div style="color:#ff4757;font-size:11px;">' + err.message + '</div>';
   } finally {
+    hideApiWait();
     guruBtn.disabled = false;
-    guruBtn.innerHTML = '🧠 Document Guru';
+    guruBtn.innerHTML = 'Doc.Guru';
   }
 }
 

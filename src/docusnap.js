@@ -181,7 +181,7 @@
     // Noise parameters (tuned for smooth bounding box tracking)
     // Lower Q = smoother, higher R = trust predictions more (less jitter)
     this.Q = processNoise != null ? processNoise : 0.01;     // Process noise (lowered for smoothness)
-    this.R = measurementNoise != null ? measurementNoise : 8.0;  // Measurement noise (increased to reduce jitter)
+    this.R = measurementNoise != null ? measurementNoise : 12.0;  // Measurement noise (heavier smoothing, less jitter)
   }
 
   /**
@@ -1171,8 +1171,8 @@
     if (hLines.length > 10) hLines = hLines.slice(0, 10);
     if (vLines.length > 10) vLines = vLines.slice(0, 10);
 
-    // Known document aspect ratios: ID-1 credit card (1.586), ID-3 passport (1.417)
-    var knownAspects = [1.586, 1.417];
+    // Known document aspect ratios (landscape and portrait)
+    var knownAspects = [1.586, 1.417, 1.294, 0.707, 0.773]; // ID, passport, letter, A4-portrait, letter-portrait
 
     var bestResult = null;
     var bestScore = -1;
@@ -1319,13 +1319,15 @@
             if (!anglesOk || totalDeviation > maxTotalDeviation) { _rej.angles++; continue; }
 
             // --- ROTATION CHECK ---
-            // Document must be roughly horizontal (within +/- 30 degrees)
-            var topDx = sorted[1].x - sorted[0].x;  // TR.x - TL.x
-            var topDy = sorted[1].y - sorted[0].y;  // TR.y - TL.y
-            var rotationRad = Math.atan2(topDy, topDx);
-            var rotationDeg = Math.abs(rotationRad * 180 / Math.PI);
-            // Allow +/- 45 degrees from horizontal (0°) or if document is upside down (180°)
-            if (rotationDeg > 45 && rotationDeg < 135) { _rej.rotation++; continue; }
+            // When minAspect < 1.0, portrait orientation is allowed — skip rotation gate.
+            // Otherwise document must be roughly horizontal (within ±45°).
+            if (self._minAspect >= 1.0) {
+              var topDx = sorted[1].x - sorted[0].x;
+              var topDy = sorted[1].y - sorted[0].y;
+              var rotationRad = Math.atan2(topDy, topDx);
+              var rotationDeg = Math.abs(rotationRad * 180 / Math.PI);
+              if (rotationDeg > 45 && rotationDeg < 135) { _rej.rotation++; continue; }
+            }
 
             // --- TRAPEZOID SYMMETRY CHECK ---
             // For perspective distortion of a flat document the midpoints of the top
@@ -4072,7 +4074,7 @@
         videoElement:            this._videoElement,
         canvasElement:           this._canvasElement,
         thresholds:              this._thresholds,
-        consecutiveFramesNeeded: isManual ? 5 : 5,
+        consecutiveFramesNeeded: isManual ? 10 : 10,
         stayStillDurationMs:     isManual ? 999999 : 1000,  // never auto-fires in manual mode
         frameIntervalMs:         66,
         manualMode:              isManual,
@@ -4331,8 +4333,8 @@
     _aspectLimits(docType) {
       var m = {
         id:       { min: 1.2, max: 1.8 },   // ID cards + passports (credit-card shape)
-        document: { min: 1.2, max: 1.6 },   // Letter (1.294) / A4 (1.414) portrait
-        any:      { min: 1.0, max: 2.2 },   // relaxed — accept wide range of shapes
+        document: { min: 0.55, max: 1.6 },  // A4/Letter portrait (0.707) + landscape (1.414)
+        any:      { min: 0.55, max: 2.2 },  // relaxed — portrait & landscape
       };
       return m[docType] || m.any;
     }
