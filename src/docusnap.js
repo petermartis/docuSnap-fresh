@@ -2210,6 +2210,9 @@
       this._currentTransparency = 70;    // Start with overlay (will fade as quality improves)
       this._transparencyStep = 5;        // Change by 5% per frame
 
+      // Suppress bounding box drawing for first 3s after session start
+      this._sessionStartTime = 0;
+
       // Cached display state for 60fps rendering (updated by _evaluateFrame)
       this._lastDispW = 0;
       this._lastDispH = 0;
@@ -2663,8 +2666,8 @@
       if (this._state === State.CAPTURED) return;
 
       // Suppress bounding box for first 3 seconds — let the user stabilize
-      var sessionAge = performance.now() - (this._sessionStartTime || 0);
-      var bboxReady = sessionAge >= 3000;
+      var bboxReady = this._sessionStartTime > 0 &&
+                      (performance.now() - this._sessionStartTime) >= 3000;
 
       if (bboxReady && this._displayCorners && this._lastReport) {
         this._drawSpotlightOverlay(ctx, this._displayCorners, this._lastReport, dispW, dispH);
