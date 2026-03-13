@@ -40,9 +40,20 @@
       max-height: 55dvh;
     }
 
-    /* On wider / landscape screens let the video use more height */
+    /* Landscape: size the canvas by height (not width) so the full video
+       fits in the viewport without overflow:hidden clipping it.
+       width:auto + max-height uses the canvas intrinsic aspect ratio. */
     @media (orientation: landscape) and (min-width: 600px) {
-      .video-wrap { max-height: 70dvh; }
+      .video-wrap {
+        max-height: 90dvh;
+        width: fit-content;   /* shrink-wrap around the height-driven canvas */
+        margin: 0 auto;
+      }
+      #canvas {
+        width: auto;
+        max-height: 88dvh;    /* canvas scales to fit viewport height */
+        max-width: 100vw;
+      }
     }
 
     #video   { display: none; }
@@ -822,7 +833,7 @@
   </div><!-- #app -->
 </div><!-- .page -->
 
-<script src="../src/docusnap.js?v=15"></script>
+<script src="../src/docusnap.js?v=16"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('loading').style.display = 'none';
