@@ -336,6 +336,9 @@
     // Line tracking: protect known good lines across frames
     this._knownLines = null;
     this._knownLinesMisses = 0;
+    // Edge-map cache for every-other-frame skip in tracking mode
+    this._cachedEdgeMap  = null;  // last computed edge map
+    this._useEdgeCache   = false; // when true, _computeEdgeMap returns cached result
   }
 
   /** Initialize Hough lookup tables. */
@@ -362,6 +365,17 @@
    * @returns {{ edges: Uint8Array, gray: Uint8Array, pw: number, ph: number, scale: number }}
    */
   DocumentDetector.prototype._computeEdgeMap = function (rgba, w, h) {
+    // Every-other-frame skip: in tracking mode the caller sets _useEdgeCache=true.
+    // We return the previous frame's edge map (66ms stale) which is accurate enough
+    // for the ±15px windowed Hough searches used by trackEdges().
+    if (this._useEdgeCache && this._cachedEdgeMap &&
+        this._cachedEdgeMap.pw === Math.round(w * Math.min(1, this._processWidth / w)) &&
+        this._cachedEdgeMap.ph === Math.round(h * Math.min(1, this._processWidth / w))) {
+      this._useEdgeCache = false; // consume flag
+      return this._cachedEdgeMap;
+    }
+    this._useEdgeCache = false; // clear stale flag
+
     var scale = 1;
     var pw = w, ph = h;
     if (w > this._processWidth) {
@@ -383,7 +397,9 @@
 
     var blurred = this._dualZoneBlur(gray, pw, ph);
     var edges = this._sobelEdges(blurred, pw, ph);
-    return { edges: edges, gray: gray, pw: pw, ph: ph, scale: scale };
+    var result = { edges: edges, gray: gray, pw: pw, ph: ph, scale: scale };
+    this._cachedEdgeMap = result;
+    return result;
   };
 
   DocumentDetector.prototype.detect = function (rgba, w, h) {
@@ -2293,6 +2309,7 @@
       this._referenceLines = null;         // [h1, h2, v1, v2] from last confident detection
       this._trackLostLongEdges = 0;        // Consecutive frames where both h-lines lost
       this._maxTrackLostLongEdges = 10;    // Fall back to full detect after this many (~1s)
+      this._edgeMapSkipToggle = false;     // Alternates every tracking frame to skip edge recompute
 
       // Bounding box overlay opacity state (0 = clear, 70 = max overlay)
       this._currentTransparency = 70;    // Start with overlay (will fade as quality improves)
@@ -2329,6 +2346,7 @@
       this._cornerRejectCount = 0;
       this._kalmanFilters = null;
       this._trackingMode = false;          // Reset edge tracking
+      this._edgeMapSkipToggle = false;
       this._referenceLines = null;
       this._trackLostLongEdges = 0;
       this._currentTransparency = 70;    // Reset overlay opacity
@@ -2813,6 +2831,14 @@
       var imageData = detCtx.getImageData(0, 0, detW, visDetH);
 
       // ── Detect or track at detection resolution ─────────────────────────
+      // In tracking mode, skip Sobel+Otsu recomputation every other frame.
+      // The cached edge map (66ms stale) is accurate enough for the ±15px
+      // windowed Hough searches in trackEdges(). Full detect() always gets fresh edges.
+      if (this._trackingMode) {
+        this._edgeMapSkipToggle = !this._edgeMapSkipToggle;
+        this._scanner._detector._useEdgeCache = this._edgeMapSkipToggle;
+      }
+
       var detection;
       if (this._trackingMode && this._referenceLines) {
         // TRACK mode: windowed Hough near reference edges (much faster)
@@ -2831,6 +2857,7 @@
         // Fall back to full detection if long edges lost for too long
         if (this._trackLostLongEdges >= this._maxTrackLostLongEdges) {
           this._trackingMode = false;
+          this._edgeMapSkipToggle = false;
           this._referenceLines = null;
           this._trackLostLongEdges = 0;
           detection = this._scanner._detector.detect(imageData.data, detW, visDetH);
@@ -2965,6 +2992,7 @@
           this._frameBuffer = [];
           this._lastGoodCorners = null;
           this._trackingMode = false;          // Exit edge tracking
+          this._edgeMapSkipToggle = false;
           this._referenceLines = null;
           this._trackLostLongEdges = 0;
           this._onStateChange(State.DETECTING, "Position document in frame");
@@ -3168,6 +3196,7 @@
           this._renderCorners = null;
           this._kalmanFilters = null;
           this._trackingMode = false;
+          this._edgeMapSkipToggle = false;
           this._referenceLines = null;
           this._trackLostLongEdges = 0;
         }
