@@ -1219,6 +1219,12 @@
 
             if (edgeSupport < 0.35) { _rej.edgeSupport++; continue; }
 
+            // Reject high-texture interiors (keyboards, screens, carpet).
+            // A keyboard has dense internal edges (key dividers); a flat document doesn't.
+            // Threshold: interior edge density > 60% of the boundary edge support → reject.
+            var interiorDensity = self._measureInteriorEdgeDensity(sorted, edges, pw, ph);
+            if (interiorDensity > edgeSupport * 0.60) { _rej.interiorTexture = (_rej.interiorTexture || 0) + 1; continue; }
+
             // Aspect ratio closeness to nearest known document type
             // Score 1.0 when exact match to any known type, lower when further away
             var minAspectDist = Math.min.apply(null, knownAspects.map(function(a) { return Math.abs(aspect - a); }));
@@ -1248,11 +1254,11 @@
             var vSep = Math.min(vDist / (pw * 0.6), 1.0);
             var outerScore = (hSep + vSep) / 2;
 
-            var score = edgeSupport * 0.40
+            var score = edgeSupport * 0.35
                       + aspectScore * 0.20
                       + areaScore   * 0.15
-                      + centerScore * 0.10
-                      + outerScore  * 0.15;
+                      + centerScore * 0.20
+                      + outerScore  * 0.10;
 
             // Reject weak candidates before tracking bonus can rescue them.
             // A base score < 0.40 means the quad doesn't look like a document
@@ -1415,6 +1421,40 @@
     }
 
     return baseScore;
+  };
+
+  /**
+   * @private - Measure edge density INSIDE the candidate quad (inset bounding box).
+   * Keyboards / screens have dense internal edges; flat documents do not.
+   * Returns fraction of sampled interior pixels that are edge pixels.
+   */
+  DocumentDetector.prototype._measureInteriorEdgeDensity = function (corners, edges, w, h) {
+    var minX = corners[0].x, maxX = corners[0].x;
+    var minY = corners[0].y, maxY = corners[0].y;
+    for (var i = 1; i < 4; i++) {
+      if (corners[i].x < minX) minX = corners[i].x;
+      if (corners[i].x > maxX) maxX = corners[i].x;
+      if (corners[i].y < minY) minY = corners[i].y;
+      if (corners[i].y > maxY) maxY = corners[i].y;
+    }
+    // Inset 20% on each side so we don't sample near the boundary
+    var insetX = (maxX - minX) * 0.20;
+    var insetY = (maxY - minY) * 0.20;
+    var x0 = Math.round(Math.max(0, minX + insetX));
+    var x1 = Math.round(Math.min(w - 1, maxX - insetX));
+    var y0 = Math.round(Math.max(0, minY + insetY));
+    var y1 = Math.round(Math.min(h - 1, maxY - insetY));
+    if (x1 <= x0 || y1 <= y0) return 0;
+    // Sample every 4px for speed
+    var step = 4;
+    var total = 0, edgeCount = 0;
+    for (var y = y0; y <= y1; y += step) {
+      for (var x = x0; x <= x1; x += step) {
+        total++;
+        if (edges[y * w + x]) edgeCount++;
+      }
+    }
+    return total > 0 ? edgeCount / total : 0;
   };
 
   /**
