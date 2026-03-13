@@ -2294,7 +2294,7 @@
       this._stableFullCorners = null;    // Ground truth corners (full video resolution)
       this._displayCorners = null;       // Currently displayed corners (smoothed)
       this._cornerRejectCount = 0;       // Frames rejecting stable corners
-      this._confirmFramesNeeded = 20;    // ~2s of missed frames before clearing the box
+      this._confirmFramesNeeded = 40;    // ~4s of missed frames before clearing the box
       
       // Kalman filter state for each corner (x, y independently)
       // State: [position, velocity], we track 8 values (4 corners x 2 coords)
@@ -3187,8 +3187,11 @@
           this._displayCorners = coasted;
         }
 
-        // Only clear after ~2s of continuous missed frames
-        if (this._cornerRejectCount >= this._confirmFramesNeeded) {
+        // Never clear the bbox while confirmed (STAY_STILL) — the document has been
+        // validated, keep it locked on screen until the user moves fully away.
+        // Outside STAY_STILL, clear after ~4s of continuous missed frames.
+        if (this._state !== State.STAY_STILL &&
+            this._cornerRejectCount >= this._confirmFramesNeeded) {
           this._stableCorners = null;
           this._stableFullCorners = null;
           this._displayCorners = null;
