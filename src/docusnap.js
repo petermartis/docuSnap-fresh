@@ -2221,7 +2221,7 @@
       this._frameBufferSize = options.frameBufferSize || 10;
       this._lastGoodCorners = null;    // Previous good frame's corners for spatial consistency
       this._consecutiveWindowAnchor = null; // Corners at start of current good-frame streak
-      this._cornerDriftMax = 0.04;     // Max 4% drift from streak anchor (fraction of frame diagonal)
+      this._cornerDriftMax = 0.10;     // Max 10% drift from streak anchor (fraction of frame diagonal)
       this._stayStillStart = 0;
       this._animFrameId = null;
       this._lastEvalTime = 0;
@@ -4143,7 +4143,7 @@
         videoElement:            this._videoElement,
         canvasElement:           this._canvasElement,
         thresholds:              this._thresholds,
-        consecutiveFramesNeeded: isManual ? 15 : 15,
+        consecutiveFramesNeeded: isManual ? 8 : 8,
         stayStillDurationMs:     isManual ? 999999 : 1000,  // never auto-fires in manual mode
         frameIntervalMs:         66,
         manualMode:              isManual,
@@ -4339,7 +4339,7 @@
         cornerMarginPx:  10,
         // Must be well above the detector's 0.45 floor so confidence is a real gate,
         // not just a pass-through.
-        confidenceMin:   0.60,
+        confidenceMin:   0.50,
       };
     }
 
