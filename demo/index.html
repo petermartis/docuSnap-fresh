@@ -1158,7 +1158,7 @@ function resolveDisplayCode(frame) {
   const instant = INSTANT_CODES.has(code);
   if (instant || (performance.now() - _dispSince) >= INSTRUCTION_MIN_MS) {
     _dispCode      = code;
-    _dispHint      = frame.hint;
+    _dispHint      = getInstructionText(code);
     _dispEscalated = frame.hintEscalated;
     _dispSince     = performance.now();
   }
