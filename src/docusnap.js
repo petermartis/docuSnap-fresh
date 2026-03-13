@@ -2169,7 +2169,7 @@
       // 248 = only catch near-white hotspots; white card background (~230-247) is not flagged.
       var glareThreshold = thresholds.glareThreshold !== undefined ? thresholds.glareThreshold : 248;
       var documentSizeMin = thresholds.documentSizeMin !== undefined ? thresholds.documentSizeMin : 0.40;  // bbox width fraction
-      var documentSizeMax = thresholds.documentSizeMax !== undefined ? thresholds.documentSizeMax : 0.75;  // reject if >75% — laptop/screen
+      var documentSizeMax = thresholds.documentSizeMax !== undefined ? thresholds.documentSizeMax : 0.70;  // reject if >70% — laptop/screen
       var cornerMarginPx = thresholds.cornerMarginPx !== undefined ? thresholds.cornerMarginPx : 10;
       // Minimum composite-score confidence from the rectangle detector.
       // Must sit well above the detector's 0.45 floor so this is a real additional gate
@@ -2913,7 +2913,7 @@
 
       // Suppress display when detected rect is too large — likely laptop/screen, not a card.
       var detDocSize = report.checks.documentSize ? report.checks.documentSize.value : 0;
-      if (detDocSize > 0.75) {
+      if (detDocSize > 0.70) {
         dispCorners = null;
         fullCorners  = null;
       }
@@ -4433,7 +4433,7 @@
         glareThreshold:   q.glareThreshold != null ? q.glareThreshold : 225,
         // documentSizeMin/Max are bbox-width fractions (0-1).
         documentSizeMin: (q.size  != null ? q.size  : 40) / 100,
-        documentSizeMax: 0.75,  // reject detected rects > 75% of frame width (laptop/screen)
+        documentSizeMax: 0.70,  // reject detected rects > 70% of frame width (laptop/screen)
         cornerMarginPx:  10,
         // Must be well above the detector's 0.45 floor so confidence is a real gate,
         // not just a pass-through.
