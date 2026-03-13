@@ -3337,6 +3337,15 @@
       ctx.beginPath();
       this._drawRoundedPolygon(ctx, [tl, tr, br, bl], cornerRadius);
       ctx.fill();
+
+      // Draw visible outline so the bounding box is clear on any background
+      ctx.save();
+      ctx.beginPath();
+      this._drawRoundedPolygon(ctx, [tl, tr, br, bl], cornerRadius);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.lineWidth   = Math.max(2, docWidth * 0.006);
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
