@@ -2269,8 +2269,13 @@
         this._lastDispH = 0;
       }
       this._lastReport = null;
-      // Persistent small canvas reused every frame for detection (avoids per-frame allocation)
-      if (!this._detCanvas) this._detCanvas = document.createElement("canvas");
+      // Persistent small canvas reused every frame for detection (avoids per-frame allocation).
+      // willReadFrequently: true tells the browser to keep this canvas CPU-backed so
+      // getImageData() doesn't trigger a GPU→CPU pipeline stall on every detection frame.
+      if (!this._detCanvas) {
+        this._detCanvas = document.createElement("canvas");
+        this._detCtx    = this._detCanvas.getContext("2d", { willReadFrequently: true });
+      }
       this._sessionStartTime = performance.now(); // suppress bbox for first 3s
       this._onStateChange(State.DETECTING, "Position document in frame");
       this._tick();
@@ -2709,7 +2714,7 @@
         detCanvas.width  = detW;
         detCanvas.height = detH;
       }
-      var detCtx = detCanvas.getContext("2d");
+      var detCtx = this._detCtx;  // CPU-backed context (willReadFrequently); set at canvas creation
       detCtx.drawImage(video, 0, 0, detW, detH);
       var imageData = detCtx.getImageData(0, 0, detW, detH);
 
